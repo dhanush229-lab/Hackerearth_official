@@ -262,6 +262,9 @@ export const getAdminOverview = async (_req: Request, res: Response) => {
       inactiveStudents,
       totalAdmins,
       verifiedStudents,
+      webDevelopmentStudents,
+      dsaStudents,
+      aptitudeStudents,
       settings,
     ] = await Promise.all([
       User.countDocuments({ role: "student" }),
@@ -270,6 +273,9 @@ export const getAdminOverview = async (_req: Request, res: Response) => {
       User.countDocuments({ role: "admin" }),
       // Legacy compatibility: emailVerified is no longer proof of registration OTP verification.
       User.countDocuments({ role: "student", emailVerified: true }),
+      User.countDocuments({ role: "student", enrolledDomains: "Web Development" }),
+      User.countDocuments({ role: "student", enrolledDomains: "DSA" }),
+      User.countDocuments({ role: "student", enrolledDomains: "Aptitude" }),
       getSystemSettings(),
     ]);
 
@@ -282,6 +288,11 @@ export const getAdminOverview = async (_req: Request, res: Response) => {
         totalAdmins,
         verifiedStudents,
         registrationOpen: isStudentRegistrationAvailable(settings),
+        domainCounts: {
+          webDevelopment: webDevelopmentStudents,
+          dsa: dsaStudents,
+          aptitude: aptitudeStudents,
+        },
       },
     });
   } catch {
