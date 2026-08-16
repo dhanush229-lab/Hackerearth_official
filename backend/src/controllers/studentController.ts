@@ -59,6 +59,13 @@ const normalizeDomains = (domains: unknown): EnrolledDomain[] | null => {
   return Array.from(new Set(normalized)) as EnrolledDomain[];
 };
 
+const includesAllExistingDomains = (
+  currentDomains: EnrolledDomain[],
+  requestedDomains: EnrolledDomain[]
+) => {
+  return currentDomains.every((domain) => requestedDomains.includes(domain));
+};
+
 const formatSafeUser = (user: {
   _id: unknown;
   name: string;
@@ -197,7 +204,18 @@ export const updateStudentProfile = async (req: Request, res: Response) => {
     }
 
     const student = await User.findOneAndUpdate(
-      { _id: req.auth.userId, role: "student", isActive: true },
+      {
+        _id: req.auth.userId,
+        role: "student",
+        isActive: true,
+        enrolledDomains: {
+          $not: {
+            $elemMatch: {
+              $nin: enrolledDomains,
+            },
+          },
+        },
+      },
       { $set: { name, contactNumber, enrolledDomains } },
       { new: true, runValidators: true }
     )
@@ -209,7 +227,7 @@ export const updateStudentProfile = async (req: Request, res: Response) => {
         _id: req.auth.userId,
         role: "student",
       })
-        .select("isActive")
+        .select("isActive enrolledDomains")
         .exec();
 
       if (existingStudent && !existingStudent.isActive) {
@@ -217,6 +235,17 @@ export const updateStudentProfile = async (req: Request, res: Response) => {
           success: false,
           code: "ACCOUNT_INACTIVE",
           message: "This account is currently inactive.",
+        });
+      }
+
+      if (
+        existingStudent &&
+        !includesAllExistingDomains(existingStudent.enrolledDomains, enrolledDomains)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: "DOMAIN_REMOVAL_NOT_ALLOWED",
+          message: "Existing enrolled domains cannot be removed.",
         });
       }
 
