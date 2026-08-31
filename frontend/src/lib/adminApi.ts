@@ -7,6 +7,11 @@ export interface AdminOverview {
   totalAdmins: number;
   verifiedStudents: number;
   registrationOpen: boolean;
+  domainCounts: {
+    webDevelopment: number;
+    dsa: number;
+    aptitude: number;
+  };
 }
 
 export interface AdminStudent {
@@ -22,6 +27,77 @@ export interface AdminStudent {
   emailVerified: boolean;
   isActive: boolean;
   createdAt: string;
+}
+
+export interface AdminPointStudent {
+  id: string;
+  name: string;
+  email: string;
+  usn: string;
+  branch: string;
+  year: number;
+  totalPoints: number;
+  overallRank: number | null;
+}
+
+export interface AdminPointTransaction {
+  id: string;
+  points: number;
+  source: 'event' | 'weekly_contest' | 'admin_adjustment';
+  description?: string;
+  editable: boolean;
+  createdAt: string;
+  awardedBy?: {
+    id: string;
+    name?: string;
+    email?: string;
+  };
+}
+
+export type AdminWeeklyContestStatus = 'inactive' | 'upcoming' | 'live' | 'ended';
+
+export interface AdminWeeklyContest {
+  id: string;
+  title: string;
+  description?: string;
+  weekNumber: number;
+  contestUrl: string;
+  startDateTime: string;
+  endDateTime: string;
+  active: boolean;
+  status: AdminWeeklyContestStatus;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WeeklyContestInput {
+  title: string;
+  description?: string;
+  weekNumber: number;
+  contestUrl: string;
+  startDateTime: string;
+  endDateTime: string;
+  active: boolean;
+}
+
+export interface AdminWeeklyContestAttempt {
+  id: string;
+  studentId: string;
+  name: string;
+  usn: string;
+  email: string;
+  contactNumber: string;
+  year: number | null;
+  openedAt: string;
+  contestScore: number | null;
+}
+
+export interface AdminWeeklyContestAttemptSummary {
+  id: string;
+  title: string;
+  weekNumber: number;
+  attemptCount: number;
 }
 
 export interface StudentPagination {
@@ -59,6 +135,47 @@ interface StudentStatusResponse {
   success: true;
   message: string;
   student: AdminStudent;
+}
+
+interface AwardStudentPointsResponse {
+  success: true;
+  message: string;
+  transaction: AdminPointTransaction;
+  student: AdminPointStudent;
+}
+
+interface StudentPointHistoryResponse {
+  success: true;
+  student: AdminPointStudent;
+  transactions: AdminPointTransaction[];
+}
+
+interface AdminWeeklyContestsResponse {
+  success: true;
+  contests: AdminWeeklyContest[];
+}
+
+interface AdminWeeklyContestResponse {
+  success: true;
+  message?: string;
+  contest: AdminWeeklyContest;
+}
+
+interface AdminWeeklyContestAttemptsResponse {
+  success: true;
+  contest: AdminWeeklyContestAttemptSummary;
+  attempts: AdminWeeklyContestAttempt[];
+}
+
+interface UpsertWeeklyContestScoreResponse {
+  success: true;
+  message: string;
+  score: {
+    studentId: string;
+    contestId: string;
+    contestScore: number;
+    updatedAt: string;
+  };
 }
 
 interface RegistrationSettingsResponse {
@@ -210,6 +327,52 @@ export const updateAdminStudentStatus = (
     },
   );
 
+export const awardStudentPoints = ({
+  studentId,
+  points,
+  description,
+}: {
+  studentId: string;
+  points: number;
+  description: string;
+}) =>
+  apiRequest<AwardStudentPointsResponse>('/api/admin/leaderboard/points', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ studentId, points, description }),
+  });
+
+export const updateManualPointTransaction = ({
+  transactionId,
+  points,
+  description,
+}: {
+  transactionId: string;
+  points: number;
+  description: string;
+}) =>
+  apiRequest<AwardStudentPointsResponse>(
+    `/api/admin/leaderboard/points/${encodeURIComponent(transactionId)}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      body: JSON.stringify({ points, description }),
+    },
+  );
+
+export const getAdminStudentPointHistory = (
+  studentId: string,
+  limit = 10,
+  signal?: AbortSignal,
+) =>
+  apiRequest<StudentPointHistoryResponse>(
+    `/api/admin/leaderboard/students/${encodeURIComponent(studentId)}/points?limit=${limit}`,
+    {
+      credentials: 'include',
+      signal,
+    },
+  );
+
 export const getAdminRegistrationSettings = (signal?: AbortSignal) =>
   apiRequest<RegistrationSettingsResponse>('/api/admin/settings/registration', {
     credentials: 'include',
@@ -228,3 +391,88 @@ export const updateAdminRegistrationSettings = (
       registrationMessage,
     }),
   });
+
+export const getAdminWeeklyContests = (signal?: AbortSignal) =>
+  apiRequest<AdminWeeklyContestsResponse>('/api/admin/weekly-contests', {
+    credentials: 'include',
+    signal,
+  });
+
+export const createAdminWeeklyContest = (input: WeeklyContestInput) =>
+  apiRequest<AdminWeeklyContestResponse>('/api/admin/weekly-contests', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+
+export const updateAdminWeeklyContest = (
+  contestId: string,
+  input: Partial<WeeklyContestInput>,
+) =>
+  apiRequest<AdminWeeklyContestResponse>(
+    `/api/admin/weekly-contests/${encodeURIComponent(contestId)}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    },
+  );
+
+export const getAdminWeeklyContestAttempts = (
+  contestId: string,
+  signal?: AbortSignal,
+) =>
+  apiRequest<AdminWeeklyContestAttemptsResponse>(
+    `/api/admin/weekly-contests/${encodeURIComponent(contestId)}/attempts`,
+    {
+      credentials: 'include',
+      signal,
+    },
+  );
+
+export const downloadAdminWeeklyContestAttemptsExcel = async (
+  contestId: string,
+): Promise<{ blob: Blob; filename: string }> => {
+  const response = await fetch(
+    `${API_BASE_URL}/api/admin/weekly-contests/${encodeURIComponent(contestId)}/attempts/export`,
+    {
+      method: 'GET',
+      credentials: 'include',
+    },
+  );
+
+  if (!response.ok) {
+    const data = await parseJsonSafely(response);
+    throw new ApiError({
+      status: response.status,
+      code: getErrorCode(data),
+      message: getErrorMessage(data),
+      data,
+    });
+  }
+
+  const filename =
+    getFilenameFromContentDisposition(response.headers.get('Content-Disposition')) ??
+    'weekly-contest-attempts.xlsx';
+  const blob = await response.blob();
+
+  return { blob, filename };
+};
+
+export const upsertAdminWeeklyContestScore = ({
+  contestId,
+  studentId,
+  score,
+}: {
+  contestId: string;
+  studentId: string;
+  score: number;
+}) =>
+  apiRequest<UpsertWeeklyContestScoreResponse>(
+    `/api/admin/weekly-contests/${encodeURIComponent(contestId)}/students/${encodeURIComponent(studentId)}/score`,
+    {
+      method: 'PUT',
+      credentials: 'include',
+      body: JSON.stringify({ score }),
+    },
+  );

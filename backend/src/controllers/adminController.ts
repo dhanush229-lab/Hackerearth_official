@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import ExcelJS from "exceljs";
 import mongoose, { SortOrder } from "mongoose";
+import PointTransaction from "../models/pointTransaction";
 import User, { EnrolledDomain, IUser, VALID_DOMAINS } from "../models/user";
 import SystemSettings, { getSystemSettings } from "../models/systemSettings";
 import { isStudentRegistrationAvailable } from "../middleware/requireRegistrationOpen";
+import { getStudentOverallRank } from "../services/leaderboardService";
 
 interface StudentStatusBody {
   isActive?: unknown;
@@ -11,6 +13,17 @@ interface StudentStatusBody {
 
 interface PasswordResetLimitBody {
   clear?: unknown;
+}
+
+interface AwardStudentPointsBody {
+  studentId?: unknown;
+  points?: unknown;
+  description?: unknown;
+}
+
+interface UpdatePointTransactionBody {
+  points?: unknown;
+  description?: unknown;
 }
 
 interface RegistrationSettingsBody {
@@ -37,6 +50,8 @@ interface StudentQueryOptions {
 }
 
 const MAX_REGISTRATION_MESSAGE_LENGTH = 500;
+const MAX_POINT_AWARD = 100000;
+const MAX_POINT_DESCRIPTION_LENGTH = 240;
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -216,6 +231,72 @@ const toSafeStudent = (user: IUser) => ({
   isActive: user.isActive,
   createdAt: user.createdAt,
 });
+
+const toAdminStudentPointsSummary = (
+  user: IUser,
+  rank: Awaited<ReturnType<typeof getStudentOverallRank>>
+) => ({
+  id: user._id.toString(),
+  name: user.name,
+  email: user.email,
+  usn: user.usn,
+  branch: user.branch,
+  year: user.year,
+  totalPoints: rank?.totalPoints ?? 0,
+  overallRank: rank?.overallRank ?? null,
+});
+
+const toSafePointTransaction = (
+  transaction: {
+    _id: unknown;
+    points: number;
+    source: string;
+    description?: string;
+    weeklyContestId?: unknown;
+    weeklyContestPointType?: string;
+    createdAt: Date;
+  },
+  awardedBy?: { _id: unknown; name?: string; email?: string }
+) => ({
+  id: String(transaction._id),
+  points: transaction.points,
+  source: transaction.source,
+  description: transaction.description,
+  editable:
+    transaction.source === "event" &&
+    !transaction.weeklyContestId &&
+    !transaction.weeklyContestPointType,
+  createdAt: transaction.createdAt,
+  awardedBy: awardedBy
+    ? {
+      id: String(awardedBy._id),
+      name: awardedBy.name,
+      email: awardedBy.email,
+    }
+    : undefined,
+});
+
+const parseAwardPoints = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : null;
+  }
+
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const isEditableManualPointTransaction = (transaction: {
+  source: string;
+  weeklyContestId?: unknown;
+  weeklyContestPointType?: string;
+}) =>
+  transaction.source === "event" &&
+  !transaction.weeklyContestId &&
+  !transaction.weeklyContestPointType;
 
 const toSafeSettings = (settings: Awaited<ReturnType<typeof getSystemSettings>>) => ({
   id: settings._id.toString(),
@@ -495,6 +576,262 @@ export const updateStudentStatus = async (
       success: true,
       message: "Student status updated successfully.",
       student: toSafeStudent(student),
+    });
+  } catch {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const awardStudentPoints = async (
+  req: Request<unknown, unknown, AwardStudentPointsBody>,
+  res: Response
+) => {
+  try {
+    if (!req.auth) {
+      return res.status(401).json({
+        success: false,
+        code: "AUTH_REQUIRED",
+        message: "Authentication is required.",
+      });
+    }
+
+    const studentId = normalizeString(req.body.studentId);
+    const description = normalizeString(req.body.description);
+    const points = parseAwardPoints(req.body.points);
+
+    if (!studentId || !mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_STUDENT_ID",
+        message: "A valid student id is required.",
+      });
+    }
+
+    if (points === null || points <= 0 || points > MAX_POINT_AWARD) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_POINTS",
+        message: `Points must be a whole number from 1 to ${MAX_POINT_AWARD}.`,
+      });
+    }
+
+    if (!description) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_DESCRIPTION",
+        message: "A reason or activity description is required.",
+      });
+    }
+
+    if (description.length > MAX_POINT_DESCRIPTION_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_DESCRIPTION",
+        message: `Description cannot exceed ${MAX_POINT_DESCRIPTION_LENGTH} characters.`,
+      });
+    }
+
+    const student = await User.findOne({
+      _id: studentId,
+      role: "student",
+      isActive: true,
+    })
+      .select(STUDENT_SAFE_FIELDS)
+      .exec();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message: "Active student not found.",
+      });
+    }
+
+    const transaction = await PointTransaction.create({
+      studentId: student._id,
+      points,
+      source: "event",
+      description,
+      awardedBy: new mongoose.Types.ObjectId(req.auth.userId),
+    });
+
+    const rank = await getStudentOverallRank(student._id.toString());
+
+    return res.status(201).json({
+      success: true,
+      message: "Points awarded successfully.",
+      transaction: toSafePointTransaction(transaction),
+      student: toAdminStudentPointsSummary(student, rank),
+    });
+  } catch {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const updateManualPointTransaction = async (
+  req: Request<{ transactionId: string }, unknown, UpdatePointTransactionBody>,
+  res: Response
+) => {
+  try {
+    if (!req.auth) {
+      return res.status(401).json({
+        success: false,
+        code: "AUTH_REQUIRED",
+        message: "Authentication is required.",
+      });
+    }
+
+    const { transactionId } = req.params;
+    const points = parseAwardPoints(req.body.points);
+    const description = normalizeString(req.body.description);
+
+    if (!mongoose.Types.ObjectId.isValid(transactionId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_TRANSACTION_ID",
+        message: "A valid transaction id is required.",
+      });
+    }
+
+    if (points === null || points <= 0 || points > MAX_POINT_AWARD) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_POINTS",
+        message: `Points must be a whole number from 1 to ${MAX_POINT_AWARD}.`,
+      });
+    }
+
+    if (!description) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_DESCRIPTION",
+        message: "A reason or activity description is required.",
+      });
+    }
+
+    if (description.length > MAX_POINT_DESCRIPTION_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_DESCRIPTION",
+        message: `Description cannot exceed ${MAX_POINT_DESCRIPTION_LENGTH} characters.`,
+      });
+    }
+
+    const transaction = await PointTransaction.findById(transactionId).exec();
+
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        code: "POINT_TRANSACTION_NOT_FOUND",
+        message: "Point transaction not found.",
+      });
+    }
+
+    if (!isEditableManualPointTransaction(transaction)) {
+      return res.status(403).json({
+        success: false,
+        code: "POINT_TRANSACTION_NOT_EDITABLE",
+        message: "Only manual admin point awards can be edited here.",
+      });
+    }
+
+    const student = await User.findOne({
+      _id: transaction.studentId,
+      role: "student",
+    })
+      .select(STUDENT_SAFE_FIELDS)
+      .exec();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message: "Student not found.",
+      });
+    }
+
+    transaction.previousPoints = transaction.points;
+    transaction.previousDescription = transaction.description || "";
+    transaction.points = points;
+    transaction.description = description;
+    transaction.updatedBy = new mongoose.Types.ObjectId(req.auth.userId);
+    transaction.manualUpdatedAt = new Date();
+
+    const updatedTransaction = await transaction.save();
+    const rank = await getStudentOverallRank(student._id.toString());
+
+    return res.status(200).json({
+      success: true,
+      message: "Point award updated successfully.",
+      transaction: toSafePointTransaction(updatedTransaction),
+      student: toAdminStudentPointsSummary(student, rank),
+    });
+  } catch {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const getStudentPointHistory = async (
+  req: Request<{ studentId: string }>,
+  res: Response
+) => {
+  try {
+    const { studentId } = req.params;
+    const limit = parsePositiveInteger(req.query.limit, 10, 20);
+
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_STUDENT_ID",
+        message: "A valid student id is required.",
+      });
+    }
+
+    const student = await User.findOne({
+      _id: studentId,
+      role: "student",
+      isActive: true,
+    })
+      .select(STUDENT_SAFE_FIELDS)
+      .exec();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message: "Active student not found.",
+      });
+    }
+
+    const [rank, transactions] = await Promise.all([
+      getStudentOverallRank(student._id.toString()),
+      PointTransaction.find({
+        studentId: student._id,
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate<{ awardedBy?: { _id: unknown; name?: string; email?: string } }>(
+          "awardedBy",
+          "name email"
+        )
+        .exec(),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      student: toAdminStudentPointsSummary(student, rank),
+      transactions: transactions.map((transaction) =>
+        toSafePointTransaction(transaction, transaction.awardedBy)
+      ),
     });
   } catch {
     return res.status(500).json({

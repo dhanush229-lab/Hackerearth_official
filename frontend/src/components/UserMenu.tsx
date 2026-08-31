@@ -1,7 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ChevronDown, ChevronUp, LogOut, User } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  LogOut,
+  Settings,
+  User,
+} from "lucide-react";
+
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
 import { useToast } from "./ToastProvider";
@@ -20,13 +27,18 @@ export default function UserMenu({
   fullWidth = false,
 }: UserMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion() ?? false;
+
   const { user, logout } = useAuth();
   const { showToast } = useToast();
-  const displayedUsername = user?.name || user?.email?.split("@")[0] || "User";
+
+  const displayedUsername =
+    user?.name || user?.email?.split("@")[0] || "User";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -59,16 +71,39 @@ export default function UserMenu({
     };
   }, [isOpen]);
 
+  const closeMenuAndNavigate = (path: string) => {
+    setIsOpen(false);
+    onAfterAction?.();
+    navigate(path);
+  };
+
+  const handleProfile = () => {
+    if (!user) return;
+
+    const dashboardPath =
+      user.role === "admin"
+        ? "/admin/dashboard"
+        : "/student/dashboard";
+
+    closeMenuAndNavigate(dashboardPath);
+  };
+
+  const handleSettings = () => {
+    closeMenuAndNavigate("/settings");
+  };
+
   const handleLogout = async () => {
     setIsOpen(false);
 
     try {
       await logout();
+
       showToast({
         variant: "success",
         title: "Logged out",
         message: "You have been logged out successfully.",
       });
+
       onAfterAction?.();
       navigate("/login");
     } catch {
@@ -85,7 +120,10 @@ export default function UserMenu({
   }
 
   return (
-    <div ref={rootRef} className={cn("relative", fullWidth && "w-full")}>
+    <div
+      ref={rootRef}
+      className={cn("relative", fullWidth && "w-full")}
+    >
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
@@ -99,7 +137,11 @@ export default function UserMenu({
         )}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <User className="size-4 shrink-0 text-primary-text" aria-hidden="true" />
+          <User
+            className="size-4 shrink-0 text-primary-text"
+            aria-hidden="true"
+          />
+
           <span
             className="truncate text-xs font-semibold xl:text-sm"
             title={displayedUsername}
@@ -107,10 +149,17 @@ export default function UserMenu({
             {displayedUsername}
           </span>
         </span>
+
         {isOpen ? (
-          <ChevronUp className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+          <ChevronUp
+            className="size-4 shrink-0 text-ink-muted"
+            aria-hidden="true"
+          />
         ) : (
-          <ChevronDown className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+          <ChevronDown
+            className="size-4 shrink-0 text-ink-muted"
+            aria-hidden="true"
+          />
         )}
       </button>
 
@@ -120,35 +169,77 @@ export default function UserMenu({
             id={menuId}
             role="menu"
             initial={
-              shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: -6, scale: 0.98 }
+              shouldReduceMotion
+                ? { opacity: 1 }
+                : {
+                  opacity: 0,
+                  y: -6,
+                  scale: 0.98,
+                }
             }
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+            }}
             exit={
-              shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.98 }
+              shouldReduceMotion
+                ? { opacity: 0 }
+                : {
+                  opacity: 0,
+                  y: -4,
+                  scale: 0.98,
+                }
             }
-            transition={{ duration: shouldReduceMotion ? 0 : 0.16, ease: "easeOut" }}
+            transition={{
+              duration: shouldReduceMotion ? 0 : 0.16,
+              ease: "easeOut",
+            }}
             className={cn(
               "absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-56 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-card border border-line-strong bg-surface/95 p-1.5 text-ink shadow-surface backdrop-blur-xl",
               fullWidth && "left-0 right-auto w-full",
               menuClassName
             )}
           >
+            {/* Profile */}
             <button
               type="button"
               role="menuitem"
-              disabled
-              className="flex min-h-11 w-full cursor-not-allowed items-center gap-2 rounded-control px-3 text-left text-sm font-semibold text-ink-subtle opacity-60"
+              onClick={handleProfile}
+              className="flex min-h-11 w-full items-center gap-2 rounded-control px-3 text-left text-sm font-semibold text-ink-muted transition hover:bg-primary/10 hover:text-primary-text focus-visible:outline-offset-2"
             >
-              <User className="size-4" aria-hidden="true" />
+              <User
+                className="size-4"
+                aria-hidden="true"
+              />
               Profile
             </button>
+
+            {/* Settings */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleSettings}
+              className="flex min-h-11 w-full items-center gap-2 rounded-control px-3 text-left text-sm font-semibold text-ink-muted transition hover:bg-primary/10 hover:text-primary-text focus-visible:outline-offset-2"
+            >
+              <Settings
+                className="size-4"
+                aria-hidden="true"
+              />
+              Settings
+            </button>
+
+            {/* Logout */}
             <button
               type="button"
               role="menuitem"
               onClick={() => void handleLogout()}
               className="flex min-h-11 w-full items-center gap-2 rounded-control px-3 text-left text-sm font-semibold text-ink-muted transition hover:bg-highlight/10 hover:text-highlight-text focus-visible:outline-offset-2"
             >
-              <LogOut className="size-4" aria-hidden="true" />
+              <LogOut
+                className="size-4"
+                aria-hidden="true"
+              />
               Logout
             </button>
           </motion.div>

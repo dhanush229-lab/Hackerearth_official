@@ -1,724 +1,670 @@
-//cumulative leaderboard
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { Crown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, X } from "lucide-react";
+import {
+  ArrowRight,
+  Award,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Crown,
+  Medal,
+  RotateCcw,
+  Search,
+  Trophy,
+} from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import * as XLSX from "xlsx";
-import { useTheme } from "../context/ThemeContext";
-import Loader from "../components/Loader";
+import PageTransition from "../components/ui/PageTransition";
+import { useAuth } from "../context/AuthContext";
+import { ApiError } from "../lib/api";
+import {
+  getOverallLeaderboard,
+  getStudentRank,
+  getStudentWeeklyRank,
+  getWeeklyContestWeeks,
+  getWeeklyLeaderboard,
+  type LeaderboardPagination,
+  type OverallLeaderboardEntry,
+  type StudentRank,
+  type StudentWeeklyRank,
+  type WeeklyLeaderboardEntry,
+} from "../lib/leaderboardApi";
+import { cn } from "../lib/utils";
 
-// --- Type Definitions ---
-interface LeaderboardEntry {
-  Name: string;
-  Score: number;
-  TimeDisplay: string;
-  Email: string;
-  UniqueKey: string;
-}
+type LeaderboardMode = "overall" | "weekly";
+type LeaderboardEntry = OverallLeaderboardEntry | WeeklyLeaderboardEntry;
+type WeeklySelection = "all" | number;
 
-interface ContestDataMap {
-  [key: string]: LeaderboardEntry[];
-}
-
-// --- Configuration ---
-const CONTEST_FILES: { viewKey: string; filename: string }[] = [
-  { viewKey: "Week 1", filename: "weekly_contest_1_leaderboard.xlsx" },
-  { viewKey: "Week 2", filename: "weekly_contest_2_leaderboard_v2.xlsx" },
-  { viewKey: "Week 3", filename: "weekly_contest_3_leaderboard.xlsx" },
-  { viewKey: "Week 4", filename: "weekly_contest_4_leaderboard.xlsx" },
-  { viewKey: "Week 5", filename: "weekly_contest_5_leaderboard.xlsx" },
-  { viewKey: "Week 6", filename: "weekly_contest_6_leaderboard.xlsx" },
-  { viewKey: "Week 7", filename: "weekly_contest_7_leaderboard.xlsx" },
-  { viewKey: "Week 8", filename: "weekly_contest_8_leaderboard.xlsx" },
-  { viewKey: "Week 9", filename: "weekly_contest_9_leaderboard.xlsx" },
-  { viewKey: "Week 10", filename: "weekly_contest_10_leaderboard.xlsx" },
-  { viewKey: "Week 11", filename: "weekly_contest_11_leaderboard_v2.xlsx" },
-  { viewKey: "Week 12", filename: "weekly_contest_12_leaderboard.xlsx" },
-];
-
-const VIEW_OPTIONS = ["Cumulative", ...CONTEST_FILES.map(f => f.viewKey)];
-const DEFAULT_VIEW = "Cumulative";
-const NAME_HEADER_KEY = "Name";
-const SCORE_HEADER_KEY = "Total Score 500.0";
+const DEFAULT_PAGINATION: LeaderboardPagination = {
+  page: 1,
+  limit: 25,
+  total: 0,
+  totalPages: 1,
+};
 
 const topRankStyles = [
   {
-    container: "border-highlight/30 bg-highlight/10",
-    number: "text-highlight-text",
-    crown: "text-highlight",
+    card: "order-1 border-highlight/35 bg-highlight/10 lg:order-2 lg:-mt-4",
+    icon: Crown,
+    iconClass: "text-highlight",
+    label: "Champion",
   },
   {
-    container: "border-line-strong bg-surface-muted",
-    number: "text-ink-muted",
-    crown: "text-ink-subtle",
+    card: "order-2 border-technical/30 bg-technical/10 lg:order-1",
+    icon: Trophy,
+    iconClass: "text-technical-text",
+    label: "Runner up",
   },
   {
-    container: "border-highlight/20 bg-highlight/5",
-    number: "text-highlight-text",
-    crown: "text-highlight/70",
+    card: "order-3 border-creative/30 bg-creative/10",
+    icon: Medal,
+    iconClass: "text-creative-text",
+    label: "Top three",
   },
 ] as const;
 
-// --- Helper Functions ---
-const getUniqueKey = (email: string | undefined, name: string): string => {
-  const normalizedEmail = String(email || "").toLowerCase().trim();
+const isOverallEntry = (
+  entry: LeaderboardEntry
+): entry is OverallLeaderboardEntry => "totalPoints" in entry;
 
-  if (normalizedEmail) {
-    return `E_${normalizedEmail}`;
-  }
+const getPoints = (entry: LeaderboardEntry) =>
+  isOverallEntry(entry) ? entry.totalPoints : entry.points;
 
-  // fallback ONLY if email is missing
-  const normalizedName = String(name || "N/A").toLowerCase().trim();
-  return `N_${normalizedName}`;
+const modeLabels: Record<LeaderboardMode, string> = {
+  overall: "Overall Ranks",
+  weekly: "Weekly Contests",
 };
 
-const formatTimeForDisplay = (timeValue: unknown): string => {
-  if (typeof timeValue === "number") {
-    const totalSeconds = Math.round(timeValue * 24 * 3600);
-    const absSeconds = Math.max(0, totalSeconds);
-    const hh = String(Math.floor(absSeconds / 3600)).padStart(2, "0");
-    const mm = String(Math.floor((absSeconds % 3600) / 60)).padStart(2, "0");
-    const ss = String(absSeconds % 60).padStart(2, "0");
-    return `${hh}:${mm}:${ss}`;
+const getEmptyMessage = (mode: LeaderboardMode, search: string) => {
+  if (search) {
+    return `No rankings matched "${search}".`;
   }
-  return typeof timeValue === 'string' && timeValue.includes(':') ? timeValue : "00:00:00";
+
+  return mode === "weekly"
+    ? "No weekly contest rankings have been published yet."
+    : "No leaderboard records are available yet.";
 };
 
-
-const Leaderboard = () => {
-  const { isDark } = useTheme();
-  const shouldReduceMotion = useReducedMotion();
-
-  const [allContestData, setAllContestData] = useState<ContestDataMap>({});
-  const [fileMissing, setFileMissing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState(DEFAULT_VIEW);
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortConfig, setSortConfig] = useState<{ key: keyof LeaderboardEntry; direction: "asc" | "desc" } | null>({ key: "Score", direction: "desc" });
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
-  const [modalSearchValue, setModalSearchValue] = useState("");
-  const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const searchDialogRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const leaderboardContentRef = useRef<HTMLDivElement>(null);
-  const wasSearchModalOpenRef = useRef(false);
-
-  const processAllData = useCallback(async () => {
-    const contestMap: ContestDataMap = {};
-    const masterCumulativeData: { [key: string]: LeaderboardEntry } = {};
-
-    for (const contest of CONTEST_FILES) {
-      const { viewKey, filename } = contest;
-      try {
-        const response = await fetch(`/${filename}`, {
-          cache: 'no-store',
-        });
-        if (!response.ok) {
-          contestMap[viewKey] = [];
-          continue;
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
-
-        const individualWeekData: LeaderboardEntry[] = [];
-
-        jsonData.forEach((row) => {
-          const rawName = row[NAME_HEADER_KEY];
-          const name = String(rawName || "").trim();
-
-          const email = String(row["Email"] || "").trim();
-          const score = Number(row[SCORE_HEADER_KEY]) || 0;
-          const timeDisplay = formatTimeForDisplay(row["Time Taken"]);
-
-          const uniqueKey = getUniqueKey(email,name);
-
-          if (uniqueKey.startsWith('UNKNOWN')) return;
-
-          const entry: LeaderboardEntry = {
-            Name: name,
-            Email: email,
-            Score: score,
-            TimeDisplay: timeDisplay,
-            UniqueKey: uniqueKey,
-          };
-          individualWeekData.push(entry);
-
-          // Cumulative Logic
-          if (!masterCumulativeData[uniqueKey]) {
-            masterCumulativeData[uniqueKey] = {
-              Name: name,
-              Email: email,
-              Score: score,
-              TimeDisplay: "",
-              UniqueKey: uniqueKey,
-            };
-          } else {
-            // accumulate score
-            masterCumulativeData[uniqueKey].Score += score;
-
-            // choose the best name
-            const existingName = masterCumulativeData[uniqueKey].Name.trim();
-            const newName = name.trim();
-
-            if (newName && (newName.length > existingName.length)) {
-              masterCumulativeData[uniqueKey].Name = newName;
-            }
-          }
-
-        });
-
-        contestMap[viewKey] = individualWeekData;
-
-      } catch (error) {
-        console.error(`Error processing file ${filename}:`, error);
-      }
-    }
-
-    contestMap[DEFAULT_VIEW] = Object.values(masterCumulativeData);
-
-    return contestMap;
-  }, []);
-
-  // --- Effects and Memoization ---
-
-  useEffect(() => {
-    setLoading(true);
-    processAllData().then((contestMap) => {
-      setAllContestData(contestMap);
-      const hasData = (contestMap[DEFAULT_VIEW]?.length || 0) > 0;
-      setFileMissing(!hasData);
-      setLoading(false);
-    });
-  }, [processAllData]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-    setSearchQuery("");
-    setModalSearchValue("");
-  }, [currentView]);
-
-  useEffect(() => {
-    const leaderboardContent = leaderboardContentRef.current;
-    if (leaderboardContent) {
-      leaderboardContent.inert = isSearchModalOpen;
-    }
-
-    if (isSearchModalOpen) {
-      wasSearchModalOpenRef.current = true;
-      searchInputRef.current?.focus();
-    } else if (wasSearchModalOpenRef.current) {
-      wasSearchModalOpenRef.current = false;
-      searchTriggerRef.current?.focus();
-    }
-
-    return () => {
-      if (leaderboardContent) {
-        leaderboardContent.inert = false;
-      }
-    };
-  }, [isSearchModalOpen]);
-
-
-  const currentData = useMemo(() => {
-    return allContestData[currentView] || [];
-  }, [allContestData, currentView]);
-
-
-  const processedData = useMemo(() => {
-    let dataView = [...currentData];
-
-    // Search Filter
-    if (searchQuery) {
-      dataView = dataView.filter(row =>
-        String(row.Name).toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    // Sorting
-    if (sortConfig) {
-      dataView.sort((a, b) => {
-        const aValue = a[sortConfig.key];
-        const bValue = b[sortConfig.key];
-
-        let comparison = 0;
-
-        if (sortConfig.key === 'Score') {
-          comparison = aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
-        } else if (sortConfig.key === 'Name') {
-          comparison = String(aValue).localeCompare(String(bValue));
-        } else if (sortConfig.key === 'TimeDisplay') {
-          comparison = String(aValue).localeCompare(String(bValue));
-        }
-
-        const finalComparison = sortConfig.direction === 'asc' ? comparison : -comparison;
-
-        // Tie-breakers
-        if (sortConfig.key === 'Score' && finalComparison === 0) {
-          // For weekly contests, use TimeDisplay as tie-breaker
-          if (currentView !== 'Cumulative') {
-            const timeA = a.TimeDisplay.split(':').reduce((acc, v) => acc * 60 + Number(v), 0);
-            const timeB = b.TimeDisplay.split(':').reduce((acc, v) => acc * 60 + Number(v), 0);
-            if (timeA !== timeB) {
-              return timeA - timeB; // Lower time = better rank
-            }
-          }
-          // Final fallback: Name alphabetical order
-          return a.Name.localeCompare(b.Name);
-        }
-
-        return finalComparison;
-      });
-    }
-
-
-    return dataView;
-  }, [currentData, currentView, searchQuery, sortConfig]);
-
-  const paginatedData = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return processedData.slice(startIndex, startIndex + pageSize);
-  }, [processedData, currentPage, pageSize]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(processedData.length / pageSize)
-  );
-
-  // --- Event Handlers ---
-  const handleSort = (key: keyof LeaderboardEntry) => {
-    let direction: 'asc' | 'desc' = 'asc';
-
-    if (key === 'Score') {
-      direction = 'desc';
-    }
-
-    if (sortConfig?.key === key) {
-      direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
-    }
-    setSortConfig({ key, direction });
-  };
-
-  const handleViewChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const newView = event.target.value;
-    setCurrentView(newView);
-    setSortConfig({ key: "Score", direction: "desc" });
-  };
-
-  const handleSearch = () => {
-    setSearchQuery(modalSearchValue);
-    setCurrentPage(1);
-    setIsSearchModalOpen(false);
-  };
-
-  const clearSearch = () => {
-    setModalSearchValue("");
-    setSearchQuery("");
-    setCurrentPage(1);
-    setIsSearchModalOpen(false);
-  };
-
-  const handleSearchDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      setIsSearchModalOpen(false);
-      return;
-    }
-
-    if (event.key !== "Tab") return;
-
-    const dialog = searchDialogRef.current;
-    if (!dialog) return;
-
-    const focusableElements = Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]'
-      )
-    ).filter((element) => {
-      const style = window.getComputedStyle(element);
-      return (
-        !element.hidden &&
-        element.tabIndex >= 0 &&
-        !element.matches(":disabled") &&
-        !element.closest("[inert]") &&
-        element.getAttribute("aria-hidden") !== "true" &&
-        style.display !== "none" &&
-        style.visibility !== "hidden" &&
-        element.getClientRects().length > 0
-      );
-    });
-
-    const firstFocusableElement = focusableElements[0];
-    const lastFocusableElement = focusableElements[focusableElements.length - 1];
-    if (!firstFocusableElement || !lastFocusableElement) return;
-
-    const activeElement = document.activeElement;
-
-    if (!focusableElements.some((element) => element === activeElement)) {
-      event.preventDefault();
-      firstFocusableElement.focus();
-      return;
-    }
-
-    if (event.shiftKey && activeElement === firstFocusableElement) {
-      event.preventDefault();
-      lastFocusableElement.focus();
-    } else if (!event.shiftKey && activeElement === lastFocusableElement) {
-      event.preventDefault();
-      firstFocusableElement.focus();
-    }
-  };
-
-  // --- Render Configuration ---
-  const baseColumns: { key: keyof LeaderboardEntry; label: string; }[] = [
-    { key: "Name", label: "Name" },
-    { key: "Score", label: currentView === 'Cumulative' ? "Total Score" : "Score" },
-  ];
-
-  const columns = currentView !== 'Cumulative'
-    ? [...baseColumns, { key: "TimeDisplay" as keyof LeaderboardEntry, label: "Time Taken" }]
-    : baseColumns;
-
-  // --- Render ---
-  if (loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-canvas px-4 text-center text-ink transition-colors duration-500">
-        <Loader size={80} />
-        <p className="mt-4 text-lg font-medium">Loading Leaderboard Data from all contests...</p>
-      </div>
-    );
-  }
+const PaginationControls = ({
+  pagination,
+  onPageChange,
+}: {
+  pagination: LeaderboardPagination;
+  onPageChange: (page: number) => void;
+}) => {
+  const currentPage = Math.min(pagination.page, pagination.totalPages);
 
   return (
-    <main className="section-glow-subtle min-h-screen bg-canvas text-ink transition-colors duration-500">
-      <div ref={leaderboardContentRef} className="site-container-wide section-space pt-24 lg:pt-section">
-        <motion.header
-          className="mx-auto mb-10 max-w-4xl text-center sm:mb-12"
-          initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{
-            duration: shouldReduceMotion ? 0 : 0.5,
-            ease: [0.16, 1, 0.3, 1],
-          }}
-        >
-          <h1 className="section-heading">
-            <span className="text-gradient-subtle">{currentView} Leaderboard</span>
-          </h1>
-        </motion.header>
+    <div className="grid items-center gap-4 p-4 sm:p-6 md:grid-cols-[1fr_auto_1fr]">
+      <p className="text-sm text-ink-muted">
+        Showing {pagination.total === 0 ? 0 : (currentPage - 1) * pagination.limit + 1}
+        {" - "}
+        {Math.min(currentPage * pagination.limit, pagination.total)} of{" "}
+        {pagination.total} students
+      </p>
 
-        <motion.section
-          initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{
-            duration: shouldReduceMotion ? 0 : 0.5,
-            delay: shouldReduceMotion ? 0 : 0.04,
-            ease: [0.16, 1, 0.3, 1],
-          }}
-          className="ui-card top-border-accent-primary overflow-hidden border-primary/25"
-          aria-label="Leaderboard controls and results"
-        >
-          {fileMissing ? (
-            <div
-              className="m-4 rounded-control border border-red-500/20 bg-red-500/5 px-5 py-12 text-center font-medium text-red-600 dark:text-red-300 sm:m-6"
-              role="alert"
-            >
-              Could not load any leaderboard data. Please ensure files are correctly named and present in the /public folder.
-            </div>
-          ) : (
-            <div>
-              <div className="grid gap-4 border-b border-line p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                <div className="min-w-0">
-                  <label htmlFor="leaderboard-view" className="block text-sm font-semibold text-ink-muted">
-                    View:
-                  </label>
-                  <select
-                    id="leaderboard-view"
-                    value={currentView}
-                    onChange={handleViewChange}
-                    className="mt-2 min-h-11 w-full rounded-control border border-line-strong bg-surface px-3 py-2 font-semibold text-ink transition-colors focus:border-technical sm:max-w-xs"
-                  >
-                    {VIEW_OPTIONS.map(view => (
-                      <option key={view} value={view}>{view}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
-                  {searchQuery && (
-                    <div className="flex min-w-0 items-center gap-2 rounded-control border border-line bg-surface-muted px-3 py-2 text-sm">
-                      <span className="shrink-0 text-ink-muted">Searching:</span>
-                      <span className="min-w-0 break-all font-semibold text-primary-text">
-                        {searchQuery}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={clearSearch}
-                        className="btn btn-ghost btn-icon ml-auto shrink-0 text-ink-muted hover:text-technical-text focus-visible:outline-offset-2"
-                        aria-label="Clear leaderboard search"
-                        title="Clear search"
-                      >
-                        <X className="size-4" aria-hidden="true" />
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    ref={searchTriggerRef}
-                    type="button"
-                    onClick={() => {
-                      setModalSearchValue(searchQuery);
-                      setIsSearchModalOpen(true);
-                    }}
-                    className="btn btn-primary w-full shrink-0 sm:w-auto"
-                    aria-haspopup="dialog"
-                    aria-expanded={isSearchModalOpen}
-                  >
-                    <Search className="size-4" aria-hidden="true" />
-                    <span>Search</span>
-                  </button>
-                </div>
-              </div>
-
-              <div
-                className="max-h-[70vh] overflow-auto border-b border-line bg-surface"
-                role="region"
-                aria-label={currentView + " leaderboard table"}
-                tabIndex={0}
-              >
-                <table
-                  className={currentView !== 'Cumulative'
-                    ? "w-full min-w-[44rem] border-separate border-spacing-0 text-left text-sm"
-                    : "w-full min-w-[36rem] border-separate border-spacing-0 text-left text-sm"
-                  }
-                >
-                  <caption className="sr-only">{currentView} Leaderboard</caption>
-                  <thead>
-                    <tr>
-                      <th className="sticky left-0 top-0 z-30 w-20 min-w-20 border-b border-primary/25 bg-surface px-3 py-3 font-semibold text-ink">
-                        Rank
-                      </th>
-                      {columns.map((col) => {
-                        const isNameColumn = col.key === "Name";
-                        return (
-                          <th
-                            key={col.key}
-                            aria-sort={sortConfig?.key === col.key
-                              ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending')
-                              : 'none'
-                            }
-                            className={isNameColumn
-                              ? "sticky left-20 top-0 z-30 min-w-48 border-b border-primary/25 bg-surface p-0 font-semibold text-ink"
-                              : "sticky top-0 z-20 min-w-32 border-b border-primary/25 bg-surface p-0 font-semibold text-ink"
-                            }
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleSort(col.key)}
-                              className="flex min-h-11 w-full select-none items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-primary/5 hover:text-primary-text focus-visible:outline-offset-[-3px]"
-                              aria-label={"Sort by " + col.label}
-                            >
-                              <span>{col.label}</span>
-                              {sortConfig?.key === col.key && (
-                                sortConfig.direction === 'asc'
-                                  ? <ChevronUp className="size-4 text-technical" aria-hidden="true" />
-                                  : <ChevronDown className="size-4 text-technical" aria-hidden="true" />
-                              )}
-                            </button>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedData.map((row, index) => {
-                      const rank = (currentPage - 1) * pageSize + index + 1;
-                      const topRankStyle = rank <= 3 ? topRankStyles[rank - 1] : undefined;
-                      return (
-                        <tr key={row.UniqueKey + row.Score} className="group transition-colors hover:bg-surface-muted">
-                          <td className="sticky left-0 z-10 w-20 min-w-20 border-b border-line bg-surface px-3 py-4 transition-colors group-hover:bg-surface-muted">
-                            <div
-                              className={`flex items-center gap-2 rounded-control border py-1 font-medium ${
-                                topRankStyle
-                                  ? topRankStyle.container
-                                  : "border-transparent bg-transparent"
-                              }`}
-                            >
-                              <span
-                                className={`w-6 text-center tabular-nums ${
-                                  topRankStyle ? topRankStyle.number : "text-ink-muted"
-                                }`}
-                              >
-                                {rank}
-                              </span>
-                              {rank <= 3 && (
-                                <Crown
-                                  size={18}
-                                  className={topRankStyle?.crown}
-                                  aria-hidden="true"
-                                />
-                              )}
-                            </div>
-                          </td>
-                          <td className="sticky left-20 z-10 min-w-48 border-b border-line bg-surface px-4 py-4 font-medium text-ink transition-colors group-hover:bg-surface-muted">
-                            {row.Name}
-                          </td>
-                          <td className="min-w-32 border-b border-line px-4 py-4 font-mono font-semibold tabular-nums text-success-text">
-                            {Math.round(row.Score)}
-                          </td>
-                          {currentView !== 'Cumulative' && (
-                            <td className="min-w-36 border-b border-line px-4 py-4 font-mono tabular-nums text-ink-muted">
-                              {row.TimeDisplay}
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                    {paginatedData.length === 0 && (
-                      <tr className="text-ink-subtle">
-                        <td colSpan={columns.length + 1} className="p-8 text-center">
-                          No results found for "{searchQuery}" in {currentView}.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="grid items-center gap-4 p-4 sm:p-6 md:grid-cols-[1fr_auto_1fr]">
-                <div className="flex items-center gap-2 text-sm text-ink-muted">
-                  <label htmlFor="leaderboard-page-size">Rows per page:</label>
-                  <select
-                    id="leaderboard-page-size"
-                    value={pageSize}
-                    onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                    className="min-h-11 rounded-control border border-line-strong bg-surface px-2 py-1 font-semibold text-ink focus:border-technical"
-                  >
-                    {[10, 20, 50].map(size => <option key={size} value={size}>{size}</option>)}
-                  </select>
-                </div>
-
-                <div className="text-sm font-medium tabular-nums text-ink-muted md:text-center">
-                  Page {currentPage} of {totalPages}
-                </div>
-
-                <div className="flex items-center gap-2 md:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
-                    className="btn btn-secondary btn-icon"
-                    aria-label="First page"
-                    title="First page"
-                  >
-                    <ChevronsLeft className="size-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => p - 1)}
-                    disabled={currentPage === 1}
-                    className="btn btn-secondary btn-icon"
-                    aria-label="Previous page"
-                    title="Previous page"
-                  >
-                    <ChevronLeft className="size-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => p + 1)}
-                    disabled={currentPage === totalPages}
-                    className="btn btn-secondary btn-icon"
-                    aria-label="Next page"
-                    title="Next page"
-                  >
-                    <ChevronRight className="size-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={currentPage === totalPages}
-                    className="btn btn-secondary btn-icon"
-                    aria-label="Last page"
-                    title="Last page"
-                  >
-                    <ChevronsRight className="size-4" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </motion.section>
+      <div className="text-sm font-medium tabular-nums text-ink-muted md:text-center">
+        Page {currentPage} of {pagination.totalPages}
       </div>
 
-      {isSearchModalOpen && (
-        <div
-          className={isDark
-            ? "fixed inset-0 z-[100] flex items-center justify-center bg-ink-inverse/80 p-4"
-            : "fixed inset-0 z-[100] flex items-center justify-center bg-ink/60 p-4"
-          }
+      <div className="flex items-center gap-2 md:justify-end">
+        <button
+          type="button"
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+          className="btn btn-secondary btn-icon"
+          aria-label="First page"
+          title="First page"
         >
-          <div
-            ref={searchDialogRef}
-            className="ui-card top-border-accent-primary max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto border-primary/25 p-5 sm:p-6"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="leaderboard-search-title"
-            onKeyDown={handleSearchDialogKeyDown}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <h3 id="leaderboard-search-title" className="font-display text-xl font-semibold text-ink">
-                Search Leaderboard
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsSearchModalOpen(false)}
-                className="btn btn-ghost btn-icon shrink-0 text-ink-muted hover:text-technical-text"
-                aria-label="Close search dialog"
-                title="Close"
-              >
-                <X className="size-5" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="mt-6">
-              <label htmlFor="leaderboard-search-input" className="sr-only">
-                Enter Name to search...
-              </label>
-              <input
-                ref={searchInputRef}
-                id="leaderboard-search-input"
-                type="text"
-                value={modalSearchValue}
-                onChange={(e) => setModalSearchValue(e.target.value)}
-                placeholder="Enter Name to search..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSearch();
-                }}
-                className="min-h-11 w-full rounded-control border border-line-strong bg-surface px-3 py-2 text-ink transition-colors placeholder:text-ink-subtle focus:border-technical"
-              />
-            </div>
-
-            <div className="mt-6 flex flex-col-reverse gap-3 xs:flex-row xs:justify-end">
-              <button type="button" onClick={clearSearch} className="btn btn-secondary w-full xs:w-auto">
-                Clear Search
-              </button>
-              <button type="button" onClick={handleSearch} className="btn btn-primary w-full xs:w-auto">
-                Search
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+          <ChevronsLeft className="size-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+          className="btn btn-secondary btn-icon"
+          aria-label="Previous page"
+          title="Previous page"
+        >
+          <ChevronLeft className="size-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= pagination.totalPages}
+          className="btn btn-secondary btn-icon"
+          aria-label="Next page"
+          title="Next page"
+        >
+          <ChevronRight className="size-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(pagination.totalPages)}
+          disabled={currentPage >= pagination.totalPages}
+          className="btn btn-secondary btn-icon"
+          aria-label="Last page"
+          title="Last page"
+        >
+          <ChevronsRight className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   );
-
 };
 
-export default Leaderboard;
+const TopThree = ({ entries }: { entries: LeaderboardEntry[] }) => {
+  const topEntries = entries.filter((entry) => entry.rank <= 3);
+
+  if (topEntries.length === 0) return null;
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3 lg:items-end">
+      {topEntries.map((entry) => {
+        const style = topRankStyles[entry.rank - 1];
+        const Icon = style.icon;
+
+        return (
+          <article
+            key={entry.studentId}
+            className={cn(
+              "ui-card-glass relative overflow-hidden p-5 text-center shadow-soft",
+              style.card
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-8 -top-10 size-28 rounded-full bg-dream/20 blur-2xl"
+            />
+            <Icon
+              className={cn("mx-auto size-9", style.iconClass)}
+              aria-hidden="true"
+            />
+            <p className="mt-3 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-ink-subtle">
+              {style.label}
+            </p>
+            <p className="mt-2 text-3xl font-bold tabular-nums text-ink">
+              #{entry.rank}
+            </p>
+            <h3 className="mt-3 break-words font-display text-xl font-semibold text-ink">
+              {entry.name}
+            </h3>
+            <p className="mt-1 font-mono text-xs font-semibold text-ink-muted">
+              {entry.usn}
+            </p>
+            <p className="mt-3 text-2xl font-bold tabular-nums text-primary-text">
+              {getPoints(entry)}
+            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+              Points
+            </p>
+          </article>
+        );
+      })}
+    </div>
+  );
+};
+
+const LeaderboardTable = ({
+  entries,
+  mode,
+  search,
+}: {
+  entries: LeaderboardEntry[];
+  mode: LeaderboardMode;
+  search: string;
+}) => (
+  <div
+    className="overflow-auto border-b border-line bg-surface"
+    role="region"
+    aria-label={`${modeLabels[mode]} table`}
+    tabIndex={0}
+  >
+    <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-left text-sm">
+      <caption className="sr-only">{modeLabels[mode]}</caption>
+      <thead>
+        <tr>
+          {["Rank", "Student", "USN", "Branch", "Year", "Points"].map((column) => (
+            <th
+              key={column}
+              className="sticky top-0 z-10 border-b border-primary/25 bg-surface px-4 py-3 font-semibold text-ink"
+            >
+              {column}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((entry) => (
+          <tr key={`${entry.rank}-${entry.studentId}`} className="group transition-colors hover:bg-surface-muted">
+            <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-primary-text">
+              #{entry.rank}
+            </td>
+            <td className="border-b border-line px-4 py-4">
+              <p className="font-semibold text-ink">{entry.name}</p>
+            </td>
+            <td className="border-b border-line px-4 py-4 font-mono text-xs font-semibold text-ink-muted">
+              {entry.usn}
+            </td>
+            <td className="border-b border-line px-4 py-4 text-ink-muted">
+              {entry.branch}
+            </td>
+            <td className="border-b border-line px-4 py-4 font-mono tabular-nums text-ink-muted">
+              {entry.year}
+            </td>
+            <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-success-text">
+              {getPoints(entry)}
+            </td>
+          </tr>
+        ))}
+        {entries.length === 0 && (
+          <tr>
+            <td colSpan={6} className="px-4 py-10 text-center text-ink-muted">
+              {getEmptyMessage(mode, search)}
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+);
+
+export default function Leaderboard() {
+  const shouldReduceMotion = useReducedMotion();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [mode, setMode] = useState<LeaderboardMode>("overall");
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [pagination, setPagination] = useState(DEFAULT_PAGINATION);
+  const [weeks, setWeeks] = useState<number[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState<WeeklySelection>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [studentRank, setStudentRank] = useState<StudentRank | null>(null);
+  const [studentWeeklyRank, setStudentWeeklyRank] = useState<StudentWeeklyRank | null>(null);
+  const [studentRankError, setStudentRankError] = useState("");
+
+  const pageSize = 25;
+
+  const loadLeaderboard = useMemo(
+    () => async () => {
+      setIsLoading(true);
+      setErrorMessage("");
+
+      try {
+        if (mode === "overall") {
+          const data = await getOverallLeaderboard({
+            page,
+            limit: pageSize,
+            search: appliedSearch,
+          });
+          setEntries(data.leaderboard);
+          setPagination(data.pagination);
+        } else if (selectedWeek === "all" || selectedWeek) {
+          const data = await getWeeklyLeaderboard({
+            scope: selectedWeek === "all" ? "all" : "week",
+            week: selectedWeek === "all" ? undefined : selectedWeek,
+            page,
+            limit: pageSize,
+            search: appliedSearch,
+          });
+          setEntries(data.leaderboard);
+          setPagination(data.pagination);
+        } else {
+          setEntries([]);
+          setPagination(DEFAULT_PAGINATION);
+        }
+      } catch (error) {
+        setEntries([]);
+        setPagination(DEFAULT_PAGINATION);
+        setErrorMessage(
+          error instanceof ApiError
+            ? error.message
+            : "Unable to load leaderboard right now."
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [appliedSearch, mode, page, selectedWeek]
+  );
+
+  useEffect(() => {
+    void loadLeaderboard();
+  }, [loadLeaderboard]);
+
+  useEffect(() => {
+    const loadWeeks = async () => {
+      try {
+        const data = await getWeeklyContestWeeks();
+        setWeeks(data.weeks);
+        setSelectedWeek((current) =>
+          current === "all" || (typeof current === "number" && data.weeks.includes(current))
+            ? current
+            : "all"
+        );
+      } catch {
+        setWeeks([]);
+        setSelectedWeek("all");
+      }
+    };
+
+    void loadWeeks();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || user?.role !== "student") {
+      setStudentRank(null);
+      setStudentWeeklyRank(null);
+      return;
+    }
+
+    const loadStudentRank = async () => {
+      try {
+        setStudentRankError("");
+        if (mode === "overall") {
+          const data = await getStudentRank();
+          setStudentRank(data.rank);
+          setStudentWeeklyRank(null);
+        } else {
+          const data = await getStudentWeeklyRank({
+            scope: selectedWeek === "all" ? "all" : "week",
+            week: selectedWeek === "all" ? undefined : selectedWeek,
+          });
+          setStudentWeeklyRank(data.rank);
+          setStudentRank(null);
+        }
+      } catch {
+        setStudentRank(null);
+        setStudentWeeklyRank(null);
+        setStudentRankError("Your standing could not be loaded right now.");
+      }
+    };
+
+    void loadStudentRank();
+  }, [isAuthenticated, mode, selectedWeek, user?.role]);
+
+  const handleModeChange = (nextMode: LeaderboardMode) => {
+    setMode(nextMode);
+    setPage(1);
+    setAppliedSearch("");
+    setSearchInput("");
+  };
+
+  const handleWeekChange = (week: WeeklySelection) => {
+    setSelectedWeek(week);
+    setPage(1);
+  };
+
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAppliedSearch(searchInput.trim());
+    setPage(1);
+  };
+
+  const tableEntries =
+    page === 1 ? entries.filter((entry) => entry.rank > 3) : entries;
+
+  return (
+    <PageTransition>
+      <main className="section-glow-subtle min-h-screen bg-canvas text-ink transition-colors duration-500">
+        <div className="site-container-wide section-space pt-24 lg:pt-section">
+          <motion.header
+            className="mx-auto mb-8 max-w-4xl text-center sm:mb-10"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              duration: shouldReduceMotion ? 0 : 0.5,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+          >
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.16em] text-primary-text">
+              HackerEarth Hub NMAMIT
+            </p>
+            <h1 className="section-heading mt-3">
+              <span className="text-gradient-subtle">Leaderboard</span>
+            </h1>
+            <p className="section-lead mx-auto mt-4 text-center">
+              Track club participation, activity points, and weekly contest performance.
+            </p>
+          </motion.header>
+
+          <div className="mx-auto mb-8 flex w-full max-w-xl rounded-2xl border border-line/70 bg-surface-muted/55 p-1 shadow-soft">
+            {(["overall", "weekly"] as LeaderboardMode[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => handleModeChange(option)}
+                className={cn(
+                  "min-h-11 flex-1 rounded-xl border px-3 py-2 text-sm font-semibold transition duration-200 focus-visible:outline-offset-2",
+                  mode === option
+                    ? "border-dream/40 bg-gradient-to-r from-primary/15 via-dream/10 to-technical/10 text-primary-text shadow-soft"
+                    : "border-transparent text-ink-muted hover:border-dream/30 hover:bg-dream-soft/35 hover:text-ink"
+                )}
+                aria-pressed={mode === option}
+              >
+                {modeLabels[option]}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.36fr)]">
+            <section className="space-y-5">
+              <div className="ui-card top-border-accent-primary overflow-hidden border-primary/25">
+                <div className="grid gap-4 border-b border-line p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <div>
+                    <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-technical-text">
+                      {mode === "weekly"
+                        ? selectedWeek === "all"
+                          ? "All Weekly Contest Rankings"
+                          : `Week ${selectedWeek} Rankings`
+                        : modeLabels[mode]}
+                    </p>
+                    <h2 className="mt-1 font-display text-2xl font-semibold text-ink">
+                      {mode === "weekly" ? "Weekly Contests" : "Overall Ranks"}
+                    </h2>
+                  </div>
+
+                  <form onSubmit={handleSearch} className="flex min-w-0 gap-2">
+                    <label htmlFor="leaderboard-search" className="sr-only">
+                      Search by student name or USN
+                    </label>
+                    <input
+                      id="leaderboard-search"
+                      type="search"
+                      value={searchInput}
+                      onChange={(event) => setSearchInput(event.target.value)}
+                      placeholder="Search name or USN"
+                      className="min-h-11 min-w-0 flex-1 rounded-control border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25"
+                    />
+                    <button type="submit" className="btn btn-primary shrink-0">
+                      <Search className="size-4" aria-hidden="true" />
+                      Search
+                    </button>
+                  </form>
+                </div>
+
+                {mode === "weekly" && (
+                  <div className="border-b border-line p-4 sm:p-6">
+                    {weeks.length > 0 ? (
+                      <div className="flex flex-wrap gap-2" aria-label="Weekly contest selector">
+                        <button
+                          type="button"
+                          onClick={() => handleWeekChange("all")}
+                          className={cn(
+                            "rounded-full border px-4 py-2 text-sm font-semibold transition focus-visible:outline-offset-2",
+                            selectedWeek === "all"
+                              ? "border-dream/40 bg-dream/15 text-dream-text shadow-soft"
+                              : "border-line bg-surface text-ink-muted hover:border-dream/35 hover:text-ink"
+                          )}
+                          aria-pressed={selectedWeek === "all"}
+                        >
+                          All Weekly Contests
+                        </button>
+                        {weeks.map((week) => (
+                          <button
+                            key={week}
+                            type="button"
+                            onClick={() => handleWeekChange(week)}
+                            className={cn(
+                              "rounded-full border px-4 py-2 text-sm font-semibold transition focus-visible:outline-offset-2",
+                              selectedWeek === week
+                                ? "border-dream/40 bg-dream/15 text-dream-text shadow-soft"
+                                : "border-line bg-surface text-ink-muted hover:border-dream/35 hover:text-ink"
+                            )}
+                            aria-pressed={selectedWeek === week}
+                          >
+                            Week {week}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-ink-muted">
+                        No weekly contest rankings have been published yet.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {isLoading ? (
+                  <div className="grid gap-4 p-4 sm:p-6">
+                    {[0, 1, 2].map((item) => (
+                      <div
+                        key={item}
+                        className="h-20 animate-pulse rounded-card bg-surface-muted motion-reduce:animate-none"
+                      />
+                    ))}
+                  </div>
+                ) : errorMessage ? (
+                  <div className="m-4 rounded-control border border-rose/30 bg-rose/10 px-5 py-10 text-center sm:m-6">
+                    <p className="font-semibold text-rose-text">{errorMessage}</p>
+                    <button
+                      type="button"
+                      className="btn btn-secondary mt-5"
+                      onClick={() => void loadLeaderboard()}
+                    >
+                      <RotateCcw className="size-4" aria-hidden="true" />
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="p-4 sm:p-6">
+                      <TopThree entries={entries} />
+                    </div>
+                    <LeaderboardTable
+                      entries={tableEntries}
+                      mode={mode}
+                      search={appliedSearch}
+                    />
+                    <PaginationControls
+                      pagination={pagination}
+                      onPageChange={setPage}
+                    />
+                  </>
+                )}
+              </div>
+            </section>
+
+            <aside className="space-y-5">
+              {!authLoading && !isAuthenticated && (
+                <div className="ui-card-glass border-dream/25 p-5">
+                  <Award className="size-8 text-dream-text" aria-hidden="true" />
+                  <h2 className="mt-4 font-display text-xl font-semibold text-ink">
+                    Sign in to know your rank.
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-ink-muted">
+                    Log in with your NMAMIT account to see your personal standing.
+                  </p>
+                  <Link to="/login" className="btn btn-primary mt-5 w-full justify-center">
+                    Login
+                    <ArrowRight className="size-4" aria-hidden="true" />
+                  </Link>
+                </div>
+              )}
+
+              {!authLoading && user?.role === "student" && (
+                <div className="ui-card-glass border-technical/25 p-5">
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-technical-text">
+                    Your Standing
+                  </p>
+                  {mode === "overall" && studentRank ? (
+                    <div className="mt-4 grid gap-3">
+                      <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                          Your Rank
+                        </p>
+                        <p className="mt-1 text-3xl font-bold tabular-nums text-primary-text">
+                          #{studentRank.overallRank}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                            Total Points
+                          </p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                            {studentRank.totalPoints}
+                          </p>
+                        </div>
+                        <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                            Out Of
+                          </p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                            {studentRank.totalActiveStudents}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : mode === "weekly" && studentWeeklyRank ? (
+                    <div className="mt-4 grid gap-3">
+                      <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                          {studentWeeklyRank.scope === "all"
+                            ? "All Weekly Rank"
+                            : `Week ${studentWeeklyRank.week} Rank`}
+                        </p>
+                        <p className="mt-1 text-3xl font-bold tabular-nums text-primary-text">
+                          {studentWeeklyRank.weeklyRank
+                            ? `#${studentWeeklyRank.weeklyRank}`
+                            : "Not ranked"}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                            Weekly Points
+                          </p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                            {studentWeeklyRank.weeklyPoints}
+                          </p>
+                        </div>
+                        <div className="rounded-card border border-line/80 bg-surface/80 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                            Ranked
+                          </p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                            {studentWeeklyRank.totalRankedStudents}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm leading-6 text-ink-muted">
+                      {studentRankError || "Loading your standing..."}
+                    </p>
+                  )}
+                </div>
+              )}
+            </aside>
+          </div>
+        </div>
+      </main>
+    </PageTransition>
+  );
+}

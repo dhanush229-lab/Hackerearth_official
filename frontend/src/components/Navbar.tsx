@@ -14,7 +14,7 @@ interface NavbarProps {
 
 const navItems = [
   { name: 'Events', href: '/events' },
-  { name: 'Leaderboard', disabled: true },
+  { name: 'Leaderboard', href: '/leaderboard' },
   { name: 'Team', href: '/team' },
   { name: 'Domains', href: '/domains' },
   { name: 'Contact', href: '/contact' },
@@ -22,7 +22,7 @@ const navItems = [
 
 const adminNavItems = [
   { name: 'Events', href: '/events' },
-  { name: 'Leaderboard', disabled: true },
+  { name: 'Leaderboard', href: '/leaderboard' },
   { name: 'Team', href: '/team' },
   { name: 'Admin', href: '/admin/dashboard' },
   { name: 'Contact', href: '/contact' },
@@ -33,7 +33,7 @@ const studentDashboardNavItems = [
   { name: 'Events & Tasks', target: 'student-events-tasks' },
   { name: 'Resources', target: 'student-resources' },
   { name: 'My Domains', target: 'student-domains' },
-  { name: 'Leaderboard', disabled: true },
+  { name: 'Leaderboard', href: '/leaderboard' },
   { name: 'Contact', href: '/contact' },
 ] as const;
 

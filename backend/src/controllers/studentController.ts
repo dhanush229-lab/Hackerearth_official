@@ -1,30 +1,9 @@
 import { Request, Response } from "express";
 import User, { EnrolledDomain, VALID_DOMAINS } from "../models/user";
-
-interface DomainGroup {
-  domain: EnrolledDomain;
-  joinUrl: string;
-}
-
-const DOMAIN_GROUP_ENV_KEYS: Record<EnrolledDomain, string> = {
-  "Web Development": "WHATSAPP_WEB_DEVELOPMENT_URL",
-  DSA: "WHATSAPP_DSA_URL",
-  Aptitude: "WHATSAPP_APTITUDE_URL",
-};
-
-const getConfiguredDomainGroups = (
-  enrolledDomains: EnrolledDomain[]
-): DomainGroup[] => {
-  return enrolledDomains.flatMap((domain) => {
-    const joinUrl = process.env[DOMAIN_GROUP_ENV_KEYS[domain]]?.trim();
-
-    if (!joinUrl) {
-      return [];
-    }
-
-    return [{ domain, joinUrl }];
-  });
-};
+import {
+  getStudentOverallRank,
+  getStudentWeeklyRank,
+} from "../services/leaderboardService";
 
 const safeUserFields =
   "name email usn contactNumber branch year enrolledDomains role emailVerified isActive";
@@ -91,56 +70,6 @@ const formatSafeUser = (user: {
   emailVerified: user.emailVerified,
   isActive: user.isActive,
 });
-
-export const getStudentDomainGroups = async (req: Request, res: Response) => {
-  try {
-    if (!req.auth) {
-      return res.status(401).json({
-        success: false,
-        code: "AUTH_REQUIRED",
-        message: "Authentication is required.",
-      });
-    }
-
-    const student = await User.findById(req.auth.userId)
-      .select("enrolledDomains isActive role")
-      .exec();
-
-    if (!student) {
-      return res.status(401).json({
-        success: false,
-        code: "INVALID_TOKEN",
-        message: "Invalid authentication token.",
-      });
-    }
-
-    if (student.role !== "student") {
-      return res.status(403).json({
-        success: false,
-        code: "FORBIDDEN",
-        message: "You do not have permission to access this resource.",
-      });
-    }
-
-    if (!student.isActive) {
-      return res.status(403).json({
-        success: false,
-        code: "ACCOUNT_INACTIVE",
-        message: "This account is currently inactive.",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      groups: getConfiguredDomainGroups(student.enrolledDomains),
-    });
-  } catch (_error) {
-    return res.status(500).json({
-      success: false,
-      message: "Unexpected server error.",
-    });
-  }
-};
 
 export const updateStudentProfile = async (req: Request, res: Response) => {
   try {
@@ -260,6 +189,100 @@ export const updateStudentProfile = async (req: Request, res: Response) => {
       success: true,
       message: "Profile updated successfully.",
       user: formatSafeUser(student),
+    });
+  } catch (_error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const getStudentRank = async (req: Request, res: Response) => {
+  try {
+    if (!req.auth) {
+      return res.status(401).json({
+        success: false,
+        code: "AUTH_REQUIRED",
+        message: "Authentication is required.",
+      });
+    }
+
+    const rank = await getStudentOverallRank(req.auth.userId);
+
+    if (!rank) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message: "Student account was not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      rank,
+    });
+  } catch (_error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const getStudentWeeklyStanding = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    if (!req.auth) {
+      return res.status(401).json({
+        success: false,
+        code: "AUTH_REQUIRED",
+        message: "Authentication is required.",
+      });
+    }
+
+    if (
+      req.query.scope !== undefined &&
+      req.query.scope !== "all" &&
+      req.query.scope !== "week"
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_SCOPE",
+        message: "Weekly standing scope must be all or week.",
+      });
+    }
+
+    const scope = req.query.scope === "all" ? "all" : "week";
+    const week = Number(req.query.week);
+
+    if (scope === "week" && (!Number.isInteger(week) || week < 1 || week > 10)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_WEEK",
+        message: "A valid week number from 1 to 10 is required.",
+      });
+    }
+
+    const rank = await getStudentWeeklyRank(
+      req.auth.userId,
+      scope === "week" ? week : undefined,
+      scope
+    );
+
+    if (!rank) {
+      return res.status(404).json({
+        success: false,
+        code: "STUDENT_NOT_FOUND",
+        message: "Student account was not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      rank,
     });
   } catch (_error) {
     return res.status(500).json({

@@ -27,13 +27,13 @@ const navItems = [
   { name: 'Events', path: '/events', icon: Calendar },
   { name: 'Team', path: '/team', icon: Users },
   { name: 'Domains', path: '/domains', icon: Code },
-  { name: 'Leaderboard', disabled: true, icon: Award },
+  { name: 'Leaderboard', path: '/leaderboard', icon: Award },
   { name: 'Contact', path: '/contact', icon: Mail },
 ] as const;
 
 const adminNavItems = [
   { name: 'Events', path: '/events', icon: Calendar },
-  { name: 'Leaderboard', disabled: true, icon: Award },
+  { name: 'Leaderboard', path: '/leaderboard', icon: Award },
   { name: 'Team', path: '/team', icon: Users },
   { name: 'Admin', path: '/admin/dashboard', icon: LayoutDashboard },
   { name: 'Contact', path: '/contact', icon: Mail },
@@ -44,7 +44,7 @@ const studentDashboardNavItems = [
   { name: 'Events & Tasks', target: 'student-events-tasks', icon: CalendarCheck },
   { name: 'Resources', target: 'student-resources', icon: BookOpen },
   { name: 'My Domains', target: 'student-domains', icon: Shapes },
-  { name: 'Leaderboard', disabled: true, icon: Award },
+  { name: 'Leaderboard', path: '/leaderboard', icon: Award },
   { name: 'Contact', path: '/contact', icon: Mail },
 ] as const;
 

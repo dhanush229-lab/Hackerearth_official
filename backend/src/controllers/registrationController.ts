@@ -83,8 +83,8 @@ const normalizeRegistrationInput = (
     return { message: "Contact number must contain exactly 10 digits." };
   }
 
-  if (!Number.isInteger(year) || year < 1 || year > 4) {
-    return { message: "Year must be an integer from 1 to 4." };
+  if (!Number.isInteger(year) || year < 2 || year > 4) {
+    return { message: "Year must be an integer from 2 to 4." };
   }
 
   if (password !== confirmPassword) {

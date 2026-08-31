@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Users, Trophy, Calendar, Rocket, ChevronRight, FolderOpen, Quote } from "lucide-react";
+import { ArrowRight, Users, Trophy, Calendar, Rocket, ChevronRight, FolderOpen } from "lucide-react";
 import TypingHero from "../components/TypingHero";
-import { Code, Brain, Lightbulb, Puzzle, Calculator, TrendingUp } from "lucide-react";
+import { Code } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import HackerEarthGlassEmblem from "../components/ui/HackerEarthGlassEmblem";
 import PageTransition from "../components/ui/PageTransition";
 import SectionReveal from "../components/ui/SectionReveal";
+import DomainVisualCarousel, { type DomainVisualKind } from "../components/home/DomainVisualCarousel";
+import HomeTeamCollage from "../components/home/HomeTeamCollage";
+import MemberExperienceMarquee, { type MemberExperience } from "../components/home/MemberExperienceMarquee";
 // import CurvedHorizonGlow from '../components/CurvedHorizonGlow';
 // import CurvedSectionTransition from '../components/CurvedSectionTransition';
 
@@ -37,9 +39,8 @@ const EventCard = ({ event, index }: { event: EventItem; index: number }) => {
           ease: [0.16, 1, 0.3, 1],
         }}
         viewport={{ once: true, amount: 0.3 }}
-        className={`ui-card-glass top-border-accent-primary flex h-full min-w-0 flex-col overflow-hidden border-dream/25 transition duration-300 group-hover:border-dream/50 group-hover:shadow-glow ${
-          shouldReduceMotion ? "" : "group-hover:-translate-y-1 group-hover:scale-[1.01]"
-        }`}
+        className={`ui-card-glass top-border-accent-primary flex h-full min-w-0 flex-col overflow-hidden border-dream/25 transition duration-300 group-hover:border-dream/50 group-hover:shadow-glow ${shouldReduceMotion ? "" : "group-hover:-translate-y-1 group-hover:scale-[1.01]"
+          }`}
       >
         <div className="relative aspect-[4/3] overflow-hidden border-b border-line bg-surface-muted">
           <img
@@ -47,9 +48,8 @@ const EventCard = ({ event, index }: { event: EventItem; index: number }) => {
             alt={`${event.title} poster`}
             loading="lazy"
             decoding="async"
-            className={`size-full object-contain transition-transform duration-500 ease-in-out ${
-              shouldReduceMotion ? "" : "group-hover:scale-[1.02]"
-            }`}
+            className={`size-full object-contain transition-transform duration-500 ease-in-out ${shouldReduceMotion ? "" : "group-hover:scale-[1.02]"
+              }`}
           />
           <div
             className="pointer-events-none absolute inset-0 bg-gradient-to-t from-primary/15 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"
@@ -82,9 +82,8 @@ const EventCard = ({ event, index }: { event: EventItem; index: number }) => {
           <div className="mt-auto flex items-center gap-1.5 pt-5 text-sm font-semibold text-primary-text">
             <span>View Details</span>
             <ArrowRight
-              className={`size-4 transition-transform duration-200 ${
-                shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
-              }`}
+              className={`size-4 transition-transform duration-200 ${shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
+                }`}
               aria-hidden="true"
             />
           </div>
@@ -129,81 +128,8 @@ const events: EventItem[] = [
   },
 ];
 
-// Testimonial Card Component
-const TestimonialCard = ({
-  img,
-  name,
-  username,
-  body,
-  index,
-}: {
-  img: string;
-  name: string;
-  username: string;
-  body: string;
-  index: number;
-}) => {
-  const shouldReduceMotion = useReducedMotion();
-  const isCyanAccent = index % 2 === 0;
-
-  return (
-    <motion.article
-      initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-      transition={{
-        duration: shouldReduceMotion ? 0 : 0.5,
-        delay: shouldReduceMotion ? 0 : (index % 3) * 0.06,
-        ease: [0.16, 1, 0.3, 1],
-      }}
-      viewport={{ once: true, amount: 0.2 }}
-      className={`ui-card-glass relative min-w-0 overflow-hidden p-5 transition-colors duration-300 sm:p-6 ${
-        isCyanAccent
-          ? "top-border-accent-cyan hover:border-technical/50"
-          : "top-border-accent-violet hover:border-creative/50"
-      }`}
-    >
-      <div
-        className={`pointer-events-none absolute -left-12 -top-12 size-36 rounded-full opacity-50 ${
-          isCyanAccent ? "bg-technical/10" : "bg-creative/10"
-        }`}
-        aria-hidden="true"
-      />
-
-      <Quote
-        className={`relative mb-4 size-8 opacity-80 ${
-          isCyanAccent ? "text-technical-text" : "text-creative-text"
-        }`}
-        aria-hidden="true"
-      />
-
-      <blockquote className="relative">
-        <p className="text-sm leading-relaxed text-ink-muted sm:text-base">{body}</p>
-      </blockquote>
-
-      <footer className="relative mt-6 flex items-center gap-3 border-t border-line pt-5">
-        <img
-          src={img}
-          alt={`${name}'s profile picture`}
-          loading="lazy"
-          decoding="async"
-          className={`size-12 shrink-0 rounded-full border-2 bg-surface-muted object-cover object-[center_20%] shadow-soft ${
-            isCyanAccent ? "border-technical/35" : "border-creative/35"
-          }`}
-        />
-        <div className="min-w-0">
-          <p className="font-display text-sm font-semibold leading-5 text-ink sm:text-base">
-            {name}
-          </p>
-          <p className="break-words text-sm leading-5 text-ink-subtle">{username}</p>
-        </div>
-      </footer>
-    </motion.article>
-  );
-};
-
 // Testimonials Data
-const testimonials = [
+const testimonials: MemberExperience[] = [
   {
     name: "Vedant Suresh Mahalle ",
     username: "@vedantmahalle45",
@@ -309,224 +235,7 @@ const domainAccentStyles = [
   },
 ] as const;
 
-const serviceGlowClass: Record<DomainAccent, string> = {
-  cyan: "bg-technical/10",
-  violet: "bg-creative/10",
-  amber: "bg-highlight/10",
-};
-
-function ServiceUIGraphic({
-  feature,
-  accent,
-}: {
-  feature: DomainFeature;
-  accent: DomainAccent;
-}) {
-  return (
-    <div className="relative w-full min-w-0">
-      <div className={`absolute inset-4 rounded-3xl opacity-60 ${serviceGlowClass[accent]}`} />
-
-      {/* The graphics are rendered directly for an open, integrated feel */}
-      <div className="relative flex min-w-0 items-center justify-center py-2 sm:py-4">
-        {feature.title === "Web Development" && (
-          <WebDevelopmentGraphic />
-        )}
-        {feature.title === "Data Structures & Algorithms" && (
-          <DSAGraphic />
-        )}
-        {feature.title === "Aptitude & Reasoning" && (
-          <AptitudeGraphic />
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-// --- 1. Web Development Graphic (Aesthetic Overhaul) ---
-function WebDevelopmentGraphic() {
-  const shouldReduceMotion = useReducedMotion();
-  const codeLines = [
-    { text: "import { motion } from 'framer-motion';", color1: "text-primary-text", color2: "text-technical-text" },
-    { text: "", color1: "", color2: "" },
-    { text: "const App = () => (", color1: "text-technical-text", color2: "text-primary-text" },
-    { text: "  <motion.div animate={{ scale: 1.1 }}>", color1: "text-primary-text", color2: "text-technical-text" },
-    { text: "   Build the Future", color1: "", color2: "text-technical-text" },
-    { text: "  </motion.div>", color1: "text-primary-text", color2: "text-primary-text" },
-    { text: ");", color1: "text-technical-text", color2: "" },
-  ];
-  const lineHeight = 22;
-  const finalHeight = codeLines.length * lineHeight + 32;
-
-  return (
-    <motion.div
-      className="mx-auto w-full max-w-lg rounded-lg font-mono text-[0.625rem] shadow-surface sm:text-xs xl:text-sm"
-      initial={shouldReduceMotion ? "animate" : "initial"}
-      whileInView="animate"
-      viewport={{ once: true, amount: 0.5 }}
-    >
-      <div className="flex items-center gap-2 rounded-t-lg border-b border-line bg-surface-muted p-3">
-        <div className="size-3 rounded-full bg-technical" />
-        <div className="size-3 rounded-full bg-technical/60" />
-        <div className="size-3 rounded-full bg-technical/30" />
-      </div>
-      <motion.div
-        className="overflow-x-auto overflow-y-hidden rounded-b-lg bg-surface-raised p-3 text-ink sm:p-4"
-        variants={{ initial: { height: 0 }, animate: { height: finalHeight } }}
-        transition={
-          shouldReduceMotion
-            ? { duration: 0 }
-            : { type: "spring", stiffness: 100, damping: 20, delay: 0.2 }
-        }
-      >
-        <motion.div
-          className="min-w-[18rem]"
-          variants={{
-            animate: {
-              transition: { staggerChildren: shouldReduceMotion ? 0 : 0.12 },
-            },
-          }}
-        >
-          {codeLines.map((line, index) => (
-            <motion.p
-              key={index}
-              className="whitespace-nowrap"
-              variants={{ initial: { opacity: 0 }, animate: { opacity: 1 } }}
-              style={{ height: lineHeight }}
-            >
-              <span className="inline-block w-6 select-none text-ink-muted">{index + 1}</span>
-              <span className={line.color1}>{line.text.split(' ')[0]}</span>
-              <span className={line.color2}> {line.text.split(' ').slice(1).join(' ')}</span>
-            </motion.p>
-          ))}
-          <div className="mt-1 h-4 w-0.5 bg-technical" aria-hidden="true" />
-        </motion.div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-
-// --- 2. DSA Graphic (Carousel with Corrected & Improved Visualizations) ---
-function DSAGraphic() {
-  const shouldReduceMotion = useReducedMotion();
-  const visualizations = [
-    { title: "Pathfinding Algorithm", component: <PathfindingViz /> },
-    { title: "Sorting Algorithm", component: <SortingViz shouldReduceMotion={shouldReduceMotion} /> },
-    { title: "Graph Traversal", component: <GraphTraversalViz /> },
-  ];
-
-  const activeVisualization = visualizations[0];
-
-  return (
-    <div className="w-full flex flex-col items-center justify-center space-y-4">
-      <h3 className="text-sm font-medium text-creative-text">
-        {activeVisualization.title}
-      </h3>
-      <div className="relative w-full h-48 max-w-sm">
-        <div className="absolute inset-0">{activeVisualization.component}</div>
-      </div>
-      <div className="flex justify-center space-x-3">
-        {["O(n log n)", "O(n²)", "O(V+E)"].map((complexity) => (
-          <div key={complexity} className="rounded-full border border-creative/20 bg-creative/5 px-3 py-1 text-xs text-creative-text">
-            {complexity}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Sub-components for the DSA Carousel
-const PathfindingViz = () => {
-  const path = "M 20,50 C 60,0, 140,100, 180,50";
-  return (
-    <svg className="w-full h-full" viewBox="0 0 200 100" aria-hidden="true" focusable="false">
-      <path d={path} fill="none" stroke="rgb(var(--color-border))" strokeWidth="2" strokeDasharray="5 5" />
-      <circle cx="100" cy="50" r="6" fill="rgb(var(--color-creative))" />
-    </svg>
-  );
-};
-const SortingViz = ({ shouldReduceMotion }: { shouldReduceMotion: boolean | null }) => (
-  <div className="w-full h-full flex items-end justify-center gap-2 px-4">
-    {[50, 80, 30, 95, 40, 70, 60, 20].map((height, i) => (
-      <motion.div
-        key={i}
-        layout={!shouldReduceMotion}
-        className="w-full rounded-t-full bg-creative"
-        initial={shouldReduceMotion ? { height: `${i * 9 + 25}%` } : { height: `${height}%` }}
-        animate={{ height: `${i * 9 + 25}%` }}
-        transition={shouldReduceMotion ? { duration: 0 } : { type: "spring", stiffness: 120, damping: 12, delay: i * 0.05 }} />
-    ))}
-  </div>
-);
-const GraphTraversalViz = () => {
-  const nodes = [{ x: 50, y: 50 }, { x: 100, y: 20 }, { x: 150, y: 50 }, { x: 100, y: 80 }];
-  const edges = [{ from: 0, to: 1 }, { from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 0 }];
-  return (
-    <svg className="w-full h-full" viewBox="0 0 200 100" aria-hidden="true" focusable="false">
-      {edges.map((edge, i) => (
-        <line key={i} x1={nodes[edge.from].x} y1={nodes[edge.from].y} x2={nodes[edge.to].x} y2={nodes[edge.to].y} stroke="rgb(var(--color-border))" strokeWidth="1" />
-      ))}
-      {nodes.map((node, i) => (
-        <circle key={i} cx={node.x} cy={node.y} r="5" fill="rgb(var(--color-creative) / 0.45)" />
-      ))}
-      <circle cx={nodes[0].x} cy={nodes[0].y} r="6" fill="rgb(var(--color-creative))" />
-    </svg>
-  );
-};
-
-
-// --- 3. Aptitude Graphic (Fluid Keyframe-based Orbit) ---
-function AptitudeGraphic() {
-  const shouldReduceMotion = useReducedMotion();
-  const orbitRadius = 80;
-  return (
-    <div className="w-full h-64 flex flex-col items-center justify-center space-y-4">
-      {/* <h3 className="text-sm font-medium text-ink-muted">
-        Logical Thinking Network
-      </h3> */}
-      <div className="relative w-56 h-56">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="h-48 w-48 rounded-full bg-highlight/10 blur-xl"></div>
-        </div>
-
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-highlight shadow-soft">
-            <Brain className="h-9 w-9 text-ink-inverse" />
-          </div>
-        </div>
-
-        {[
-          { icon: Calculator },
-          { icon: TrendingUp },
-          { icon: Lightbulb },
-          { icon: Puzzle },
-        ].map(({ icon: Icon }, i) => (
-          <motion.div
-            key={i}
-            className="absolute top-1/2 left-1/2"
-            style={{
-              x: [orbitRadius, 0, -orbitRadius, 0][i] - 20,
-              y: [0, orbitRadius, 0, -orbitRadius][i] - 20,
-            }}
-          >
-            <motion.div
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-highlight shadow-soft"
-              whileHover={shouldReduceMotion ? undefined : { scale: 1.25, transition: { type: 'spring', stiffness: 300 } }}
-            >
-              <Icon className="h-5 w-5 text-ink-inverse" />
-            </motion.div>
-          </motion.div>
-        ))}
-      </div>
-      <div className="rounded-full border border-highlight/20 bg-highlight/5 px-4 py-1 text-xs font-medium text-highlight-text">
-        Analytical Reasoning
-      </div>
-    </div>
-  );
-}
-
+const domainVisualKinds: DomainVisualKind[] = ["web", "dsa", "aptitude"];
 
 const features: DomainFeature[] = [
   {
@@ -688,34 +397,33 @@ const Home = () => {
   return (
     <PageTransition className="relative isolate overflow-hidden bg-transparent text-ink transition-colors duration-300">
 
-  <div className="fixed left-8 top-1/2 z-20 hidden w-8 -translate-y-1/2 flex-col items-center gap-1 lg:flex">
-    {features.map((_, idx) => (
-      <button
-        key={idx}
-        onClick={() => scrollToFeature(idx)}
-        className="group relative flex size-11 items-center justify-center rounded-full"
-        aria-label={`Go to ${features[idx].title}`}
-      >
-        <span
-          className={`size-3 rounded-full border transition duration-300 ${
-            activeFeature === idx
-              ? idx === 0
-                ? "scale-125 border-technical bg-technical shadow-soft"
-                : idx === 1
-                  ? "scale-125 border-creative bg-creative shadow-soft"
-                  : "scale-125 border-highlight bg-highlight shadow-soft"
-              : "border-line-strong bg-surface-muted group-hover:border-primary group-hover:bg-primary/20"
-          }`}
-          aria-hidden="true"
-        />
-        <div className="pointer-events-none absolute left-12 top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
-          <div className="whitespace-nowrap rounded-control border border-line bg-ink px-3 py-2 text-sm font-medium text-ink-inverse shadow-soft">
-            {features[idx].title}
-          </div>
-        </div>
-      </button>
-    ))}
-  </div>
+      <div className="fixed left-8 top-1/2 z-20 hidden w-8 -translate-y-1/2 flex-col items-center gap-1 lg:flex">
+        {features.map((_, idx) => (
+          <button
+            key={idx}
+            onClick={() => scrollToFeature(idx)}
+            className="group relative flex size-11 items-center justify-center rounded-full"
+            aria-label={`Go to ${features[idx].title}`}
+          >
+            <span
+              className={`size-3 rounded-full border transition duration-300 ${activeFeature === idx
+                  ? idx === 0
+                    ? "scale-125 border-technical bg-technical shadow-soft"
+                    : idx === 1
+                      ? "scale-125 border-creative bg-creative shadow-soft"
+                      : "scale-125 border-highlight bg-highlight shadow-soft"
+                  : "border-line-strong bg-surface-muted group-hover:border-primary group-hover:bg-primary/20"
+                }`}
+              aria-hidden="true"
+            />
+            <div className="pointer-events-none absolute left-12 top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
+              <div className="whitespace-nowrap rounded-control border border-line bg-ink px-3 py-2 text-sm font-medium text-ink-inverse shadow-soft">
+                {features[idx].title}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
 
       <section className="hero-crescent relative isolate flex min-h-[100svh] items-center overflow-hidden bg-transparent pb-section-sm pt-28 text-ink sm:pt-32 lg:pt-36">
         <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
@@ -734,7 +442,7 @@ const Home = () => {
 
         <div className="site-container-wide relative z-20 w-full">
           <motion.div
-            className="grid w-full min-w-0 items-center gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] lg:gap-10 xl:gap-14"
+            className="grid w-full min-w-0 items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)] lg:gap-10 xl:gap-14"
             initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.55, ease: [0.16, 1, 0.3, 1] }}
@@ -792,9 +500,8 @@ const Home = () => {
                     className="btn btn-primary group w-full px-6 focus-visible:outline-offset-4 sm:w-auto sm:text-base"
                   >
                     <ArrowRight
-                      className={`size-4 ${
-                        shouldReduceMotion ? "" : "transition-transform duration-200 group-hover:translate-x-0.5"
-                      }`}
+                      className={`size-4 ${shouldReduceMotion ? "" : "transition-transform duration-200 group-hover:translate-x-0.5"
+                        }`}
                       aria-hidden="true"
                     />
                     <span>Join Our Community</span>
@@ -808,7 +515,7 @@ const Home = () => {
               delay={0.32}
               className="relative flex w-full items-center justify-center py-4 lg:min-h-[24rem] lg:py-0"
             >
-              <HackerEarthGlassEmblem />
+              <HomeTeamCollage />
             </SectionReveal>
           </motion.div>
         </div>
@@ -893,17 +600,15 @@ const Home = () => {
                     <button
                       type="button"
                       onClick={handleExploreDomainClick}
-                      className={`btn btn-secondary group w-full sm:w-auto ${
-                        idx === activeFeature
+                      className={`btn btn-secondary group w-full sm:w-auto ${idx === activeFeature
                           ? domainAccentStyles[idx].button
                           : ""
-                      }`}
+                        }`}
                     >
                       <span>Explore Domain</span>
                       <ChevronRight
-                        className={`size-4 transition-transform ${
-                          shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
-                        }`}
+                        className={`size-4 transition-transform ${shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
+                          }`}
                       />
                     </button>
                   </motion.div>
@@ -916,7 +621,10 @@ const Home = () => {
                     viewport={{ once: true, amount: 0.2 }}
                   >
                     <div className="ui-card-muted relative min-w-0 overflow-hidden p-3 sm:p-5">
-                      <ServiceUIGraphic feature={feature} accent={domainAccentStyles[idx].accent} />
+                      <DomainVisualCarousel
+                        domain={domainVisualKinds[idx]}
+                        accent={domainAccentStyles[idx].accent}
+                      />
                     </div>
                   </motion.div>
                 </div>
@@ -982,23 +690,7 @@ const Home = () => {
             </p>
           </SectionReveal>
 
-          <div className="mt-12 grid items-start gap-5 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
-            {testimonials.map((testimonial, index) => (
-              <TestimonialCard
-                key={`${testimonial.name}-${testimonial.username}`}
-                {...testimonial}
-                index={index}
-              />
-            ))}
-          </div>
-
-          <div className="mt-10 flex justify-center sm:mt-12">
-            <span className="btn btn-secondary group relative overflow-hidden">
-              <span className="absolute inset-x-0 -top-px mx-auto h-px w-3/4 bg-gradient-to-r from-transparent via-technical/40 to-transparent" />
-              <span className="absolute inset-x-0 -bottom-px mx-auto h-px w-3/4 bg-gradient-to-r from-transparent via-creative/40 to-transparent" />
-              <span className="relative">Share your experience</span>
-            </span>
-          </div>
+          <MemberExperienceMarquee experiences={testimonials} />
         </div>
       </section>
 
@@ -1034,15 +726,13 @@ const Home = () => {
               <div className="flex items-center justify-center lg:justify-end">
                 <Link
                   to="/login"
-                  className={`btn btn-primary group w-full justify-between px-5 focus-visible:outline-offset-4 xs:w-auto xs:min-w-48 xs:justify-center ${
-                    shouldReduceMotion ? "" : "hover:-translate-y-1"
-                  }`}
+                  className={`btn btn-primary group w-full justify-between px-5 focus-visible:outline-offset-4 xs:w-auto xs:min-w-48 xs:justify-center ${shouldReduceMotion ? "" : "hover:-translate-y-1"
+                    }`}
                 >
                   <span className="flex items-center gap-2">
                     <Rocket
-                      className={`size-5 transition-transform duration-200 ${
-                        shouldReduceMotion ? "" : "group-hover:-translate-y-0.5"
-                      }`}
+                      className={`size-5 transition-transform duration-200 ${shouldReduceMotion ? "" : "group-hover:-translate-y-0.5"
+                        }`}
                       aria-hidden="true"
                     />
                     <span>Get Started</span>
@@ -1052,9 +742,8 @@ const Home = () => {
                     aria-hidden="true"
                   >
                     <ArrowRight
-                      className={`size-4 transition-transform ease-in-out ${
-                        shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
-                      }`}
+                      className={`size-4 transition-transform ease-in-out ${shouldReduceMotion ? "" : "group-hover:translate-x-0.5"
+                        }`}
                     />
                   </span>
                 </Link>

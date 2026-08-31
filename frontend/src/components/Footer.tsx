@@ -1,5 +1,4 @@
-import { Mail, MapPin, Github, Linkedin, Twitter, Instagram } from 'lucide-react';
-import logo from '../assets/image.png'; // Ensure path is correct
+import { Mail, MapPin, Github, Linkedin, Twitter, Instagram, Phone } from 'lucide-react';
 import { Link } from 'react-router-dom'; // Use Link for internal navigation
 import { useReducedMotion } from 'framer-motion';
 
@@ -31,13 +30,10 @@ const Footer = () => {
           <div className="sm:col-span-2 lg:col-span-5">
             <div className="flex items-center gap-3 sm:gap-4">
               <img
-                src={logo}
-                alt="HackerEarth Logo"
-                className="h-12 w-16 rounded-control border border-primary/25 bg-surface object-cover shadow-soft"
+                src="/branding/hackerearth-club-logo-with-name.svg"
+                alt="HackerEarth Hub NMAMIT"
+                className="h-14 w-44 rounded-control border border-primary/25 bg-white object-contain p-2 shadow-soft"
               />
-              <span className="text-gradient-subtle font-display text-2xl font-semibold tracking-tight">
-                HackerEarth
-              </span>
             </div>
             <p className="mt-5 max-w-md text-sm leading-relaxed text-ink-muted">
               The premier tech club of NMAMIT, under Department of Counselling and Welfare - Abhyuday Fostering innovation and competitive programming skills.
@@ -70,20 +66,19 @@ const Footer = () => {
             </h3>
             <div className="mt-4 space-y-2 text-sm">
               <a
-                href="mailto:Hackerearth.Nmamit@Nitte.edu.in"
+                href="mailto:hackerearth.nmamit@nitte.edu.in"
                 className="group flex min-h-11 min-w-0 items-center gap-3 rounded-control px-2 py-2 text-ink-muted transition-colors duration-200 hover:bg-surface-muted hover:text-technical-text focus-visible:bg-surface focus-visible:text-technical-text focus-visible:outline-offset-2"
               >
                 <span
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-control border border-technical/25 bg-surface text-technical-text ${
-                    shouldReduceMotion
-                      ? ''
-                      : 'transition-transform duration-200 group-hover:translate-x-0.5'
-                  }`}
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-control border border-technical/25 bg-surface text-technical-text ${shouldReduceMotion
+                    ? ''
+                    : 'transition-transform duration-200 group-hover:translate-x-0.5'
+                    }`}
                 >
                   <Mail className="size-4" aria-hidden="true" />
                 </span>
                 <span className="min-w-0 break-words underline decoration-line underline-offset-4 group-hover:decoration-technical/60">
-                  hackerearth@nmamit.in
+                  hackerearth.nmamit@nitte.edu.in
                 </span>
               </a>
               <a
@@ -93,16 +88,31 @@ const Footer = () => {
                 className="group flex min-h-11 min-w-0 items-center gap-3 rounded-control px-2 py-2 text-ink-muted transition-colors duration-200 hover:bg-surface-muted hover:text-technical-text focus-visible:bg-surface focus-visible:text-technical-text focus-visible:outline-offset-2"
               >
                 <span
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-control border border-technical/25 bg-surface text-technical-text ${
-                    shouldReduceMotion
-                      ? ''
-                      : 'transition-transform duration-200 group-hover:translate-x-0.5'
-                  }`}
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-control border border-technical/25 bg-surface text-technical-text ${shouldReduceMotion
+                    ? ''
+                    : 'transition-transform duration-200 group-hover:translate-x-0.5'
+                    }`}
                 >
                   <MapPin className="size-4" aria-hidden="true" />
                 </span>
                 <span className="min-w-0 break-words underline decoration-line underline-offset-4 group-hover:decoration-technical/60">
-                  NMAMIT, Nitte College
+                  Nitte Mahalinga Adyantaya Memorial Institute of Technology - NMAMIT, Nitte, Karkala Taluk, Udupi District, Karnataka - 574110, India
+                </span>
+              </a>
+              <a
+                href="tel:8792051545"
+                className="group flex min-h-11 min-w-0 items-center gap-3 rounded-control px-2 py-2 text-ink-muted transition-colors duration-200 hover:bg-surface-muted hover:text-technical-text focus-visible:bg-surface focus-visible:text-technical-text focus-visible:outline-offset-2"
+              >
+                <span
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-control border border-technical/25 bg-surface text-technical-text ${shouldReduceMotion
+                    ? ''
+                    : 'transition-transform duration-200 group-hover:translate-x-0.5'
+                    }`}
+                >
+                  <Phone className="size-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 break-words underline decoration-line underline-offset-4 group-hover:decoration-technical/60">
+                  +91 8792051545
                 </span>
               </a>
             </div>
@@ -121,19 +131,17 @@ const Footer = () => {
                 href={social.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`btn btn-ghost btn-icon group border-line bg-surface text-ink-muted focus-visible:border-primary/50 focus-visible:text-primary-text focus-visible:outline-offset-2 ${
-                  social.label === "LinkedIn"
-                    ? 'hover:border-creative/40 hover:text-creative-text'
-                    : 'hover:border-technical/40 hover:text-technical-text'
-                }`}
+                className={`btn btn-ghost btn-icon group border-line bg-surface text-ink-muted focus-visible:border-primary/50 focus-visible:text-primary-text focus-visible:outline-offset-2 ${social.label === "LinkedIn"
+                  ? 'hover:border-creative/40 hover:text-creative-text'
+                  : 'hover:border-technical/40 hover:text-technical-text'
+                  }`}
                 aria-label={social.label}
               >
                 <social.icon
-                  className={`size-5 ${
-                    shouldReduceMotion
-                      ? ''
-                      : 'transition-transform duration-200 group-hover:-translate-y-0.5'
-                  }`}
+                  className={`size-5 ${shouldReduceMotion
+                    ? ''
+                    : 'transition-transform duration-200 group-hover:-translate-y-0.5'
+                    }`}
                   aria-hidden="true"
                 />
               </a>
