@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import ExcelJS from "exceljs";
 import mongoose, { Types } from "mongoose";
+import ActivityOpen from "../models/ActivityOpen";
 import PointTransaction from "../models/pointTransaction";
 import User from "../models/user";
 import WeeklyContest, { IWeeklyContest } from "../models/WeeklyContest";
@@ -21,7 +22,6 @@ interface WeeklyContestScoreBody {
   score?: unknown;
 }
 
-const WEEKLY_CONTEST_REWARD_POINTS = 5;
 const MAX_CONTEST_SCORE = 100000;
 const MAX_WEEK_NUMBER = 10;
 const MAX_CONTEST_TITLE_LENGTH = 120;
@@ -61,13 +61,9 @@ const parseContestScore = (value: unknown): number | null => {
   return null;
 };
 
-const buildOpenRewardMatch = (weeklyContestId: Types.ObjectId) => ({
-  source: "weekly_contest" as const,
+const buildWeeklyContestOpenMatch = (weeklyContestId: Types.ObjectId) => ({
+  activityType: "weekly_contest" as const,
   weeklyContestId,
-  $or: [
-    { weeklyContestPointType: "open_reward" as const },
-    { weeklyContestPointType: { $exists: false as const } },
-  ],
 });
 
 const getContestStatus = (contest: {
@@ -188,18 +184,14 @@ const sanitizeFilenamePart = (value: string) => {
 const getAttemptCountsByContest = async (contestIds: Types.ObjectId[]) => {
   if (contestIds.length === 0) return new Map<string, number>();
 
-  const counts = await PointTransaction.aggregate<{
+  const counts = await ActivityOpen.aggregate<{
     _id: Types.ObjectId;
     count: number;
   }>([
     {
       $match: {
-        source: "weekly_contest",
+        activityType: "weekly_contest",
         weeklyContestId: { $in: contestIds },
-        $or: [
-          { weeklyContestPointType: "open_reward" },
-          { weeklyContestPointType: { $exists: false } },
-        ],
       },
     },
     { $group: { _id: "$weeklyContestId", count: { $sum: 1 } } },
@@ -245,7 +237,7 @@ interface AttemptStudentDetails {
 
 interface ContestAttemptRow {
   _id: unknown;
-  createdAt: Date;
+  firstOpenedAt: Date;
   contestScore: number | null;
   studentId: AttemptStudentDetails | undefined;
 }
@@ -258,7 +250,7 @@ const toAttemptStudent = (transaction: ContestAttemptRow) => ({
   email: transaction.studentId?.email ?? "",
   contactNumber: transaction.studentId?.contactNumber ?? "",
   year: transaction.studentId?.year ?? null,
-  openedAt: transaction.createdAt,
+  openedAt: transaction.firstOpenedAt,
   contestScore: transaction.contestScore,
 });
 
@@ -425,14 +417,10 @@ export const getStudentWeeklyContests = async (req: Request, res: Response) => {
     const contests = await WeeklyContest.find({ active: true })
       .sort({ weekNumber: 1 })
       .exec();
-    const claimedContestIds = await PointTransaction.distinct("weeklyContestId", {
+    const claimedContestIds = await ActivityOpen.distinct("weeklyContestId", {
       studentId: new Types.ObjectId(req.auth.userId),
-      source: "weekly_contest",
+      activityType: "weekly_contest",
       weeklyContestId: { $exists: true },
-      $or: [
-        { weeklyContestPointType: "open_reward" },
-        { weeklyContestPointType: { $exists: false } },
-      ],
     }).exec();
     const claimedSet = new Set(claimedContestIds.map((id) => String(id)));
 
@@ -515,40 +503,26 @@ export const openStudentWeeklyContest = async (
       });
     }
 
-    let awarded = true;
-    const existingOpenReward = await PointTransaction.findOne({
-      ...buildOpenRewardMatch(contest._id),
-      studentId: student._id,
-    })
-      .select("_id")
-      .exec();
+    let firstOpen = true;
 
-    if (existingOpenReward) {
-      awarded = false;
-    } else {
-      try {
-        await PointTransaction.create({
-          studentId: student._id,
-          points: WEEKLY_CONTEST_REWARD_POINTS,
-          source: "weekly_contest",
-          weeklyContestId: contest._id,
-          weeklyContestPointType: "open_reward",
-          contestId: contest._id,
-          weekNumber: contest.weekNumber,
-          description: `First valid click for ${contest.title}`,
-        });
-      } catch (error) {
-        if (!isDuplicateKeyError(error)) {
-          throw error;
-        }
-        awarded = false;
+    try {
+      await ActivityOpen.create({
+        studentId: student._id,
+        activityType: "weekly_contest",
+        weeklyContestId: contest._id,
+      });
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
       }
+      firstOpen = false;
     }
 
     return res.status(200).json({
       success: true,
-      awarded,
-      pointsAwarded: awarded ? WEEKLY_CONTEST_REWARD_POINTS : 0,
+      firstOpen,
+      awarded: false,
+      pointsAwarded: 0,
       contestUrl: contest.contestUrl,
     });
   } catch (_error) {
@@ -600,7 +574,7 @@ export const upsertAdminWeeklyContestScore = async (
 
     const contestObjectId = new Types.ObjectId(contestId);
     const studentObjectId = new Types.ObjectId(studentId);
-    const [contest, student, openReward] = await Promise.all([
+    const [contest, student, activityOpen] = await Promise.all([
       WeeklyContest.findById(contestObjectId).exec(),
       User.findOne({
         _id: studentObjectId,
@@ -609,8 +583,8 @@ export const upsertAdminWeeklyContestScore = async (
       })
         .select("_id name usn email contactNumber year")
         .exec(),
-      PointTransaction.findOne({
-        ...buildOpenRewardMatch(contestObjectId),
+      ActivityOpen.findOne({
+        ...buildWeeklyContestOpenMatch(contestObjectId),
         studentId: studentObjectId,
       }).exec(),
     ]);
@@ -631,7 +605,7 @@ export const upsertAdminWeeklyContestScore = async (
       });
     }
 
-    if (!openReward) {
+    if (!activityOpen) {
       return res.status(409).json({
         success: false,
         code: "CONTEST_ATTEMPT_REQUIRED",
@@ -723,8 +697,10 @@ export const upsertAdminWeeklyContestScore = async (
 
 const loadContestAttempts = async (contestId: string) => {
   const weeklyContestObjectId = new Types.ObjectId(contestId);
-  const attempts = await PointTransaction.find(buildOpenRewardMatch(weeklyContestObjectId))
-    .sort({ createdAt: 1 })
+  const attempts = await ActivityOpen.find(
+    buildWeeklyContestOpenMatch(weeklyContestObjectId)
+  )
+    .sort({ firstOpenedAt: 1 })
     .populate<{
       studentId?: {
         _id?: unknown;
@@ -754,7 +730,7 @@ const loadContestAttempts = async (contestId: string) => {
 
   return attempts.map((attempt) => ({
     _id: attempt._id,
-    createdAt: attempt.createdAt,
+    firstOpenedAt: attempt.firstOpenedAt,
     studentId: attempt.studentId,
     contestScore: scoreByStudent.get(String(attempt.studentId?._id)) ?? null,
   }));

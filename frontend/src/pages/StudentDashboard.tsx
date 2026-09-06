@@ -28,8 +28,11 @@ import {
   type EventSummary,
 } from "../lib/eventApi";
 import {
+  getStudentDpps,
   getStudentWeeklyContests,
+  openStudentDpp,
   openStudentWeeklyContest,
+  type StudentDpp,
   type StudentWeeklyContest,
 } from "../lib/studentApi";
 import {
@@ -149,6 +152,20 @@ const getTaskButtonLabel = (contest: StudentWeeklyContest) => {
   return contest.claimed ? "Open Contest" : "Start Contest";
 };
 
+const getDppTypeLabel = (type: StudentDpp["type"]) =>
+  type === "dsa" ? "DSA DPP" : "Aptitude DPP";
+
+const getDppAccentClasses = (type: StudentDpp["type"]) =>
+  type === "dsa"
+    ? {
+        badge: "border-technical/30 bg-technical/10 text-technical-text",
+        icon: "border-technical/25 bg-technical/10 text-technical-text",
+      }
+    : {
+        badge: "border-primary/30 bg-primary/10 text-primary-text",
+        icon: "border-primary/25 bg-primary/10 text-primary-text",
+      };
+
 const WeeklyContestTaskCard = ({
   contest,
   pending,
@@ -211,6 +228,59 @@ const WeeklyContestTaskCard = ({
   );
 };
 
+const DppCard = ({
+  dpp,
+  pending,
+  onOpen,
+}: {
+  dpp: StudentDpp;
+  pending: boolean;
+  onOpen: (dpp: StudentDpp) => void;
+}) => {
+  const accent = getDppAccentClasses(dpp.type);
+
+  return (
+    <article className="rounded-card border border-line/80 bg-surface/75 p-4 shadow-soft">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <span className={`inline-flex min-h-7 items-center rounded-full border px-2.5 font-mono text-[0.65rem] font-bold ${accent.badge}`}>
+            {getDppTypeLabel(dpp.type)}
+          </span>
+          <h4 className="mt-3 break-words font-display text-base font-semibold text-ink">
+            {dpp.title}
+          </h4>
+          {dpp.description && (
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink-muted">
+              {dpp.description}
+            </p>
+          )}
+        </div>
+        <span className={`inline-flex min-h-8 w-fit items-center rounded-full border px-3 font-mono text-[0.65rem] font-bold uppercase ${
+          dpp.opened
+            ? "border-dream/30 bg-dream/10 text-dream-text"
+            : "border-line bg-surface/80 text-ink-muted"
+        }`}>
+          {dpp.opened ? "Opened" : "New"}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onOpen(dpp)}
+        disabled={pending}
+        className="btn btn-secondary mt-4 w-full justify-center disabled:cursor-not-allowed disabled:opacity-60 sm:w-fit"
+      >
+        {pending ? (
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        ) : (
+          <ExternalLink className="size-4" aria-hidden="true" />
+        )}
+        {pending ? "Opening..." : dpp.opened ? "Open Again" : "Start DPP"}
+      </button>
+    </article>
+  );
+};
+
 const StudentDashboard = () => {
   const { user } = useAuth();
   const { isDark } = useTheme();
@@ -230,6 +300,10 @@ const StudentDashboard = () => {
   const [weeklyContestTasksError, setWeeklyContestTasksError] = useState("");
   const [isLoadingWeeklyContestTasks, setIsLoadingWeeklyContestTasks] = useState(true);
   const [pendingContestId, setPendingContestId] = useState<string | null>(null);
+  const [studentDpps, setStudentDpps] = useState<StudentDpp[]>([]);
+  const [studentDppsError, setStudentDppsError] = useState("");
+  const [isLoadingStudentDpps, setIsLoadingStudentDpps] = useState(true);
+  const [pendingDppId, setPendingDppId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -284,6 +358,31 @@ const StudentDashboard = () => {
     return () => controller.abort();
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const controller = new AbortController();
+    setIsLoadingStudentDpps(true);
+    setStudentDppsError("");
+
+    void getStudentDpps(controller.signal)
+      .then((response) => {
+        setStudentDpps(response.dpps);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setStudentDpps([]);
+        setStudentDppsError("DPPs could not be loaded right now.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoadingStudentDpps(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [user?.id]);
+
   const handleOpenWeeklyContest = async (contest: StudentWeeklyContest) => {
     if (pendingContestId || contest.status !== "live") return;
 
@@ -305,10 +404,10 @@ const StudentDashboard = () => {
           item.id === contest.id ? { ...item, claimed: true } : item
         )
       );
-      if (response.awarded) {
+      if (response.firstOpen) {
         showToast({
           variant: "success",
-          message: `+${response.pointsAwarded} weekly contest points recorded.`,
+          message: "Contest participation recorded.",
         });
       }
 
@@ -322,6 +421,48 @@ const StudentDashboard = () => {
       showToast({ variant: "error", message });
     } finally {
       setPendingContestId(null);
+    }
+  };
+
+  const handleOpenDpp = async (dpp: StudentDpp) => {
+    if (pendingDppId) return;
+
+    const externalTab = window.open("about:blank", "_blank");
+    if (!externalTab) {
+      showToast({
+        variant: "error",
+        message: "Popup was blocked. Please allow popups and try again.",
+      });
+      return;
+    }
+    externalTab.opener = null;
+    setPendingDppId(dpp.id);
+
+    try {
+      const response = await openStudentDpp(dpp.id);
+      setStudentDpps((current) =>
+        current.map((item) =>
+          item.id === dpp.id ? { ...item, opened: true } : item
+        )
+      );
+
+      if (response.firstOpen && response.pointsAwarded > 0) {
+        showToast({
+          variant: "success",
+          message: `+${response.pointsAwarded} points added to your overall leaderboard.`,
+        });
+      }
+
+      externalTab.location.href = response.dppUrl;
+    } catch (error) {
+      externalTab.close();
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to open this DPP right now.";
+      showToast({ variant: "error", message });
+    } finally {
+      setPendingDppId(null);
     }
   };
 
@@ -446,6 +587,8 @@ const StudentDashboard = () => {
   const recommendedResources = blogPosts
     .filter((resource) => enrolledCategories.has(resource.category))
     .slice(0, 3);
+  const dsaDpps = studentDpps.filter((dpp) => dpp.type === "dsa");
+  const aptitudeDpps = studentDpps.filter((dpp) => dpp.type === "aptitude");
 
   return (
     <PageTransition>
@@ -809,6 +952,85 @@ const StudentDashboard = () => {
                       )}
                     </div>
                   </article>
+                </div>
+              </section>
+            </SectionReveal>
+
+            <SectionReveal delay={0.05}>
+              <section
+                id="student-dpps"
+                aria-labelledby="student-dpps-heading"
+                className="ui-panel-glass scroll-mt-28 p-5 sm:p-6 lg:p-8"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="font-mono text-xs font-semibold uppercase tracking-[0.16em] text-technical-text">
+                      Daily practice
+                    </p>
+                    <h2 id="student-dpps-heading" className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
+                      DPP Practice
+                    </h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">
+                      Open active DSA and Aptitude practice links. Your first open is recorded by the platform.
+                    </p>
+                  </div>
+                  <span className="inline-flex min-h-10 w-fit items-center gap-2 rounded-full border border-dream/30 bg-dream/10 px-4 text-sm font-semibold text-dream-text">
+                    <BookOpen className="size-4" aria-hidden="true" />
+                    +5 on first DPP open
+                  </span>
+                </div>
+
+                <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                  {[
+                    { type: "dsa" as const, title: "DSA DPP", items: dsaDpps },
+                    { type: "aptitude" as const, title: "Aptitude DPP", items: aptitudeDpps },
+                  ].map((group) => {
+                    const accent = getDppAccentClasses(group.type);
+
+                    return (
+                      <article key={group.type} className="rounded-card border border-line/80 bg-glass/60 p-4 shadow-soft sm:p-5">
+                        <div className="flex items-center gap-3">
+                          <span className={`flex size-10 shrink-0 items-center justify-center rounded-control border ${accent.icon}`}>
+                            <BookOpen className="size-5" aria-hidden="true" />
+                          </span>
+                          <div>
+                            <h3 className="font-display text-lg font-semibold text-ink">{group.title}</h3>
+                            <p className="text-xs text-ink-subtle">Active practice links</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {isLoadingStudentDpps ? (
+                            <div className="space-y-3" aria-hidden="true">
+                              {[0, 1].map((item) => (
+                                <div
+                                  key={item}
+                                  className="h-36 animate-pulse rounded-card bg-surface-muted motion-reduce:animate-none"
+                                />
+                              ))}
+                            </div>
+                          ) : studentDppsError ? (
+                            <p className="rounded-card border border-line/80 bg-surface/75 p-4 text-sm leading-6 text-ink-muted">
+                              {studentDppsError}
+                            </p>
+                          ) : group.items.length > 0 ? (
+                            group.items.map((dpp) => (
+                              <DppCard
+                                key={dpp.id}
+                                dpp={dpp}
+                                pending={pendingDppId === dpp.id}
+                                onOpen={handleOpenDpp}
+                              />
+                            ))
+                          ) : (
+                            <p className="rounded-card border border-line/80 bg-surface/75 p-4 text-sm leading-6 text-ink-muted">
+                              No active {group.title} links right now.
+                            </p>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             </SectionReveal>

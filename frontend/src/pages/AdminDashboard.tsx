@@ -8,12 +8,14 @@ import {
 } from 'react';
 import {
   AlertCircle,
+  BookOpen,
   Brain,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Code2,
   DoorOpen,
+  ExternalLink,
   FileSpreadsheet,
   GitBranch,
   History,
@@ -50,8 +52,12 @@ import {
 import { registrationBranchOptions } from '../lib/registrationBranches';
 import {
   awardStudentPoints,
+  createAdminDpp,
   createAdminWeeklyContest,
+  downloadAdminDppOpensExcel,
   downloadAdminWeeklyContestAttemptsExcel,
+  getAdminDppOpens,
+  getAdminDpps,
   getAdminOverview,
   getAdminRegistrationSettings,
   getAdminStudentPointHistory,
@@ -62,18 +68,24 @@ import {
   type AdminPointStudent,
   type AdminPointTransaction,
   type AdminOverview,
+  type AdminDpp,
+  type AdminDppOpenStudent,
+  type AdminDppOpenSummary,
   type AdminStudent,
   type AdminWeeklyContest,
   type AdminWeeklyContestAttempt,
   type AdminWeeklyContestAttemptSummary,
+  type DppInput,
   type RegistrationSettings,
   type StudentPagination,
   type WeeklyContestInput,
   upsertAdminWeeklyContestScore,
   updateManualPointTransaction,
+  updateAdminDpp,
   updateAdminWeeklyContest,
   updateAdminRegistrationSettings,
   updateAdminStudentStatus,
+  upsertAdminDppScore,
 } from '../lib/adminApi';
 
 const PAGE_LIMIT = 25;
@@ -105,6 +117,13 @@ const emptyWeeklyContestForm = {
   endTime: '',
   active: true,
 };
+const emptyDppForm = {
+  type: 'dsa',
+  title: '',
+  url: '',
+  description: '',
+  active: true,
+};
 const MAX_POSTER_SIZE_BYTES = 5 * 1024 * 1024;
 const acceptedPosterTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -113,6 +132,7 @@ type DomainFilter = '' | 'Web Development' | 'DSA' | 'Aptitude';
 type AdminErrorKind = 'unauthorized' | 'forbidden' | 'network' | 'server' | 'api';
 type EventFormState = typeof emptyEventForm;
 type WeeklyContestFormState = typeof emptyWeeklyContestForm;
+type DppFormState = typeof emptyDppForm;
 
 interface AdminRequestError {
   kind: AdminErrorKind;
@@ -346,6 +366,42 @@ const buildWeeklyContestPayload = (form: WeeklyContestFormState): WeeklyContestI
   };
 };
 
+const getDppTypeLabel = (type: AdminDpp['type']) =>
+  type === 'dsa' ? 'DSA' : 'Aptitude';
+
+const getDppTypeClasses = (type: AdminDpp['type']) =>
+  type === 'dsa'
+    ? 'border-technical/35 bg-technical/10 text-technical-text'
+    : 'border-primary/35 bg-primary/10 text-primary-text';
+
+const getDppOpenKey = (open: AdminDppOpenStudent) => open.studentId || open.id;
+
+const buildDppPayload = (form: DppFormState): DppInput | null => {
+  const type = form.type === 'dsa' || form.type === 'aptitude' ? form.type : null;
+  const description = form.description.trim();
+
+  if (!type || !form.title.trim() || !form.url.trim()) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(form.url.trim());
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return {
+    type,
+    title: form.title.trim(),
+    url: form.url.trim(),
+    description: description || undefined,
+    active: form.active,
+  };
+};
+
 const formatShortDate = (value?: string | null) => {
   if (!value) return 'Recently';
   const date = new Date(value);
@@ -502,6 +558,24 @@ const AdminDashboard = () => {
   const [contestScoreInput, setContestScoreInput] = useState('');
   const [scoreSubmitting, setScoreSubmitting] = useState(false);
   const [scoreError, setScoreError] = useState<AdminRequestError | null>(null);
+  const [dpps, setDpps] = useState<AdminDpp[]>([]);
+  const [dppsLoading, setDppsLoading] = useState(true);
+  const [dppsError, setDppsError] = useState<AdminRequestError | null>(null);
+  const [dppsNotice, setDppsNotice] = useState<string | null>(null);
+  const [dppForm, setDppForm] = useState<DppFormState>(emptyDppForm);
+  const [dppFormError, setDppFormError] = useState<AdminRequestError | null>(null);
+  const [dppSubmitting, setDppSubmitting] = useState(false);
+  const [editingDpp, setEditingDpp] = useState<AdminDpp | null>(null);
+  const [isDppModalOpen, setIsDppModalOpen] = useState(false);
+  const [dppOpensSummary, setDppOpensSummary] = useState<AdminDppOpenSummary | null>(null);
+  const [dppOpens, setDppOpens] = useState<AdminDppOpenStudent[]>([]);
+  const [dppOpensLoading, setDppOpensLoading] = useState(false);
+  const [dppOpensError, setDppOpensError] = useState<AdminRequestError | null>(null);
+  const [dppOpensDownloading, setDppOpensDownloading] = useState(false);
+  const [dppScoreInputs, setDppScoreInputs] = useState<Record<string, string>>({});
+  const [dppScoreErrors, setDppScoreErrors] = useState<Record<string, string>>({});
+  const [dppScoreNotice, setDppScoreNotice] = useState<string | null>(null);
+  const [pendingDppScoreStudentIds, setPendingDppScoreStudentIds] = useState<Record<string, boolean>>({});
 
   const [search, setSearch] = useState('');
   const [branch, setBranch] = useState('');
@@ -597,14 +671,36 @@ const AdminDashboard = () => {
     }
   }, []);
 
+  const loadDpps = useCallback(async (signal?: AbortSignal) => {
+    setDppsLoading(true);
+    setDppsError(null);
+
+    try {
+      const response = await getAdminDpps(signal);
+      setDpps(response.dpps);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        const requestError = classifyAdminError(error, 'Unable to load DPPs.');
+        if (isGlobalAuthorizationError(requestError)) {
+          setGlobalAuthError((current) => current ?? requestError);
+        } else {
+          setDppsError(requestError);
+        }
+      }
+    } finally {
+      if (!signal?.aborted) setDppsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     void loadOverview(controller.signal);
     void loadRegistration(controller.signal);
     void loadEvents(controller.signal);
     void loadWeeklyContests(controller.signal);
+    void loadDpps(controller.signal);
     return () => controller.abort();
-  }, [loadEvents, loadOverview, loadRegistration, loadWeeklyContests]);
+  }, [loadDpps, loadEvents, loadOverview, loadRegistration, loadWeeklyContests]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1462,6 +1558,321 @@ const AdminDashboard = () => {
     }
   };
 
+  const openCreateDppModal = () => {
+    setEditingDpp(null);
+    setDppForm(emptyDppForm);
+    setDppFormError(null);
+    setIsDppModalOpen(true);
+  };
+
+  const openEditDppModal = (dpp: AdminDpp) => {
+    setEditingDpp(dpp);
+    setDppForm({
+      type: dpp.type,
+      title: dpp.title,
+      url: dpp.url,
+      description: dpp.description ?? '',
+      active: dpp.active,
+    });
+    setDppFormError(null);
+    setIsDppModalOpen(true);
+  };
+
+  const closeDppModal = () => {
+    if (dppSubmitting) return;
+    setIsDppModalOpen(false);
+    setEditingDpp(null);
+    setDppForm(emptyDppForm);
+    setDppFormError(null);
+  };
+
+  const handleDppFormChange = (
+    field: keyof DppFormState,
+    value: string | boolean
+  ) => {
+    setDppForm((current) => ({ ...current, [field]: value }));
+    setDppFormError(null);
+  };
+
+  const handleDppSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const payload = buildDppPayload(dppForm);
+    if (!payload) {
+      setDppFormError({
+        kind: 'api',
+        message: 'Fill all DPP fields with valid values.',
+      });
+      return;
+    }
+
+    setDppSubmitting(true);
+    setDppFormError(null);
+    setDppsError(null);
+    setDppsNotice(null);
+
+    try {
+      const response = editingDpp
+        ? await updateAdminDpp(editingDpp.id, payload)
+        : await createAdminDpp(payload);
+
+      setDpps((current) => {
+        const next = editingDpp
+          ? current.map((dpp) => dpp.id === response.dpp.id ? response.dpp : dpp)
+          : [response.dpp, ...current];
+
+        return next.sort((first, second) => {
+          if (first.type !== second.type) return first.type.localeCompare(second.type);
+          return first.title.localeCompare(second.title);
+        });
+      });
+      setDppsNotice(response.message ?? 'DPP saved successfully.');
+      setIsDppModalOpen(false);
+      setEditingDpp(null);
+      setDppForm(emptyDppForm);
+      setDppFormError(null);
+    } catch (error) {
+      const requestError = classifyAdminError(
+        error,
+        editingDpp ? 'Unable to update DPP.' : 'Unable to create DPP.'
+      );
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+      } else {
+        setDppFormError(requestError);
+      }
+    } finally {
+      setDppSubmitting(false);
+    }
+  };
+
+  const openDppOpensModal = async (dpp: AdminDpp) => {
+    setDppOpensSummary({
+      id: dpp.id,
+      type: dpp.type,
+      title: dpp.title,
+      firstOpenCount: dpp.firstOpenCount,
+    });
+    setDppOpens([]);
+    setDppOpensError(null);
+    setDppScoreErrors({});
+    setDppScoreNotice(null);
+    setDppOpensLoading(true);
+
+    try {
+      const response = await getAdminDppOpens(dpp.id);
+      setDppOpensSummary(response.dpp);
+      setDppOpens(response.opens);
+      setDppScoreInputs(
+        Object.fromEntries(
+          response.opens.map((open) => [
+            getDppOpenKey(open),
+            open.aptitudeScore === null ? '' : String(open.aptitudeScore),
+          ])
+        )
+      );
+      setDpps((current) =>
+        current.map((item) =>
+          item.id === response.dpp.id
+            ? { ...item, firstOpenCount: response.dpp.firstOpenCount }
+            : item
+        )
+      );
+    } catch (error) {
+      const requestError = classifyAdminError(error, 'Unable to load DPP first opens.');
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+        setDppOpensSummary(null);
+      } else {
+        setDppOpensError(requestError);
+      }
+    } finally {
+      setDppOpensLoading(false);
+    }
+  };
+
+  const closeDppOpensModal = () => {
+    if (dppOpensDownloading) return;
+    setDppOpensSummary(null);
+    setDppOpens([]);
+    setDppOpensError(null);
+    setDppScoreInputs({});
+    setDppScoreErrors({});
+    setDppScoreNotice(null);
+    setPendingDppScoreStudentIds({});
+  };
+
+  const handleDppScoreInputChange = (open: AdminDppOpenStudent, value: string) => {
+    const key = getDppOpenKey(open);
+    setDppScoreInputs((current) => ({ ...current, [key]: value }));
+    setDppScoreErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setDppScoreNotice(null);
+  };
+
+  const handleSaveDppScore = async (open: AdminDppOpenStudent) => {
+    if (!dppOpensSummary || dppOpensSummary.type !== 'aptitude') return;
+
+    const key = getDppOpenKey(open);
+    const rawScore = dppScoreInputs[key] ?? '';
+    const normalizedScore = rawScore.trim();
+
+    if (open.studentId && pendingDppScoreStudentIds[open.studentId]) return;
+
+    if (!open.studentId) {
+      setDppScoreErrors((current) => ({
+        ...current,
+        [key]: 'Student id is unavailable for this open record.',
+      }));
+      return;
+    }
+
+    if (!/^(0|[1-9]\d*)$/.test(normalizedScore)) {
+      setDppScoreErrors((current) => ({
+        ...current,
+        [key]: 'Score must be a whole number from 0 to 100000.',
+      }));
+      return;
+    }
+
+    const score = Number(normalizedScore);
+    if (!Number.isInteger(score) || score < 0 || score > 100000) {
+      setDppScoreErrors((current) => ({
+        ...current,
+        [key]: 'Score must be a whole number from 0 to 100000.',
+      }));
+      return;
+    }
+
+    setPendingDppScoreStudentIds((current) => ({
+      ...current,
+      [open.studentId as string]: true,
+    }));
+    setDppScoreNotice(null);
+    setDppScoreErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+
+    try {
+      const response = await upsertAdminDppScore({
+        dppId: dppOpensSummary.id,
+        studentId: open.studentId,
+        score,
+      });
+      setDppOpens((current) =>
+        current.map((item) =>
+          item.studentId === response.score.studentId
+            ? { ...item, aptitudeScore: response.score.aptitudeScore }
+            : item
+        )
+      );
+      setDppScoreInputs((current) => ({
+        ...current,
+        [key]: String(response.score.aptitudeScore),
+      }));
+      setDppScoreNotice('Aptitude score saved.');
+    } catch (error) {
+      const requestError = classifyAdminError(error, 'Unable to save aptitude score.');
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+      } else {
+        setDppScoreErrors((current) => ({
+          ...current,
+          [key]: requestError.message,
+        }));
+      }
+    } finally {
+      if (open.studentId) {
+        setPendingDppScoreStudentIds((current) => {
+          const next = { ...current };
+          delete next[open.studentId as string];
+          return next;
+        });
+      }
+    }
+  };
+
+  const renderDppScoreControls = (open: AdminDppOpenStudent) => {
+    const key = getDppOpenKey(open);
+    const isSaving = Boolean(open.studentId && pendingDppScoreStudentIds[open.studentId]);
+
+    return (
+      <div className="min-w-0 space-y-2">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            type="number"
+            min={0}
+            max={100000}
+            step={1}
+            value={dppScoreInputs[key] ?? ''}
+            onChange={(event) => handleDppScoreInputChange(open, event.target.value)}
+            placeholder="Score"
+            className="min-h-10 w-full rounded-control border border-line-strong bg-surface/95 px-3 py-2 text-sm text-ink shadow-soft placeholder:text-ink-subtle focus:border-technical/60 focus:ring-2 focus:ring-technical/20 sm:w-28"
+            aria-label={`Aptitude score for ${open.name}`}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary min-h-10 rounded-full"
+            onClick={() => void handleSaveDppScore(open)}
+            disabled={isSaving || !open.studentId}
+          >
+            {isSaving && (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            )}
+            {isSaving ? 'Saving...' : open.aptitudeScore === null ? 'Save Score' : 'Update Score'}
+          </button>
+        </div>
+        {dppScoreErrors[key] && (
+          <p className="text-xs leading-5 text-rose-text" role="alert">
+            {dppScoreErrors[key]}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const handleDownloadDppOpens = async (
+    dpp: AdminDpp | AdminDppOpenSummary | null = dppOpensSummary
+  ) => {
+    if (!dpp || dppOpensDownloading) return;
+
+    setDppOpensDownloading(true);
+    setDppOpensError(null);
+    setDppsError(null);
+    const isModalDownload = dppOpensSummary?.id === dpp.id;
+
+    try {
+      const { blob, filename } = await downloadAdminDppOpensExcel(dpp.id);
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      const requestError = classifyAdminError(error, 'Unable to download DPP first opens.');
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+        if (isModalDownload) setDppOpensSummary(null);
+      } else {
+        if (isModalDownload) {
+          setDppOpensError(requestError);
+        } else {
+          setDppsError(requestError);
+        }
+      }
+    } finally {
+      setDppOpensDownloading(false);
+    }
+  };
+
   const handleGlobalRetry = () => {
     setGlobalAuthError(null);
     setOverviewError(null);
@@ -1469,16 +1880,19 @@ const AdminDashboard = () => {
     setStudentsError(null);
     setEventsError(null);
     setWeeklyContestsError(null);
+    setDppsError(null);
     void loadOverview();
     void loadRegistration();
     void loadEvents();
     void loadWeeklyContests();
+    void loadDpps();
     setStudentRefreshToken((current) => current + 1);
   };
 
   const registrationOpensAt = formatDateTime(registration?.registrationOpensAt);
   const registrationClosesAt = formatDateTime(registration?.registrationClosesAt);
   const filtersActive = Boolean(search.trim() || branch.trim() || year || status || domain);
+  const dppTypeLocked = Boolean(editingDpp && editingDpp.firstOpenCount > 0);
 
   return (
     <>
@@ -1878,6 +2292,124 @@ const AdminDashboard = () => {
                         {attemptsDownloading ? 'Downloading...' : 'Download Excel'}
                       </button>
                       <button type="button" onClick={() => openEditWeeklyContestModal(contest)} className="btn btn-secondary rounded-full">
+                        <Pencil className="size-4" aria-hidden="true" />
+                        Edit
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+        </SectionReveal>
+
+        <SectionReveal delay={0.068} duration={0.42}>
+        <section aria-labelledby="dpp-management-heading" className="overflow-hidden rounded-card border border-line/80 bg-surface/90 shadow-soft">
+          <div className="border-b border-line/80 bg-dream-soft/30 p-5 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-technical-text">
+                  DSA &amp; Aptitude
+                </p>
+                <h2 id="dpp-management-heading" className="mt-1 font-display text-2xl font-semibold text-ink">
+                  Manage DPPs
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-ink-muted">
+                  Create practice problem links, track first opens, and export student participation records.
+                </p>
+              </div>
+              <button type="button" onClick={openCreateDppModal} className="btn btn-primary w-full justify-center sm:w-fit">
+                <PlusCircle className="size-4" aria-hidden="true" />
+                Add DPP
+              </button>
+            </div>
+          </div>
+
+          <div className="p-5 sm:p-6">
+            {(dppsError || dppsNotice) && (
+              <div className="mb-5">
+                {dppsError ? (
+                  <InlineFeedback kind="error">{dppsError.message}</InlineFeedback>
+                ) : dppsNotice ? (
+                  <InlineFeedback kind="success">{dppsNotice}</InlineFeedback>
+                ) : null}
+              </div>
+            )}
+
+            {dppsLoading && dpps.length === 0 ? (
+              <LoadingState label="Loading DPPs..." />
+            ) : dppsError && dpps.length === 0 ? (
+              <button type="button" onClick={() => void loadDpps()} className="btn btn-secondary">
+                <RefreshCw className="size-4" aria-hidden="true" />
+                Retry DPPs
+              </button>
+            ) : dpps.length === 0 ? (
+              <div className="rounded-card border border-line/80 bg-surface/80 p-8 text-center text-sm text-ink-muted">
+                No DPPs have been created yet.
+              </div>
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-2">
+                {dpps.map((dpp) => (
+                  <article key={dpp.id} className="rounded-card border border-line/80 bg-glass/60 p-4 shadow-soft">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <span className={`inline-flex min-h-8 items-center rounded-full border px-3 font-mono text-xs font-bold ${getDppTypeClasses(dpp.type)}`}>
+                          {getDppTypeLabel(dpp.type)}
+                        </span>
+                        <h3 className="mt-3 break-words font-display text-lg font-semibold text-ink">
+                          {dpp.title}
+                        </h3>
+                        {dpp.description && (
+                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink-muted">
+                            {dpp.description}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`inline-flex min-h-8 w-fit items-center rounded-full border px-3 font-mono text-xs font-bold ${
+                        dpp.active
+                          ? 'border-dream/35 bg-dream/10 text-dream-text'
+                          : 'border-rose/35 bg-rose/10 text-rose-text'
+                      }`}>
+                        {dpp.active ? 'ACTIVE' : 'INACTIVE'}
+                      </span>
+                    </div>
+
+                    <dl className="mt-4 grid gap-3 text-sm text-ink-muted sm:grid-cols-2">
+                      <div>
+                        <dt className="font-semibold text-ink">First Opens</dt>
+                        <dd>{dpp.firstOpenCount}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold text-ink">Updated</dt>
+                        <dd>{formatDateTime(dpp.updatedAt)}</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="font-semibold text-ink">External Link</dt>
+                        <dd className="mt-1">
+                          <a
+                            href={dpp.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex max-w-full items-center gap-2 break-all text-technical-text underline decoration-line underline-offset-4 hover:text-primary-text"
+                          >
+                            Open DPP link
+                            <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
+                          </a>
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => void openDppOpensModal(dpp)} className="btn btn-secondary rounded-full">
+                        <Users className="size-4" aria-hidden="true" />
+                        View Opens
+                      </button>
+                      <button type="button" onClick={() => void handleDownloadDppOpens(dpp)} className="btn btn-secondary rounded-full" disabled={dppOpensDownloading}>
+                        <FileSpreadsheet className="size-4" aria-hidden="true" />
+                        {dppOpensDownloading ? 'Downloading...' : 'Download Excel'}
+                      </button>
+                      <button type="button" onClick={() => openEditDppModal(dpp)} className="btn btn-secondary rounded-full">
                         <Pencil className="size-4" aria-hidden="true" />
                         Edit
                       </button>
@@ -2591,7 +3123,7 @@ const AdminDashboard = () => {
                   {scoreAttempt.usn} • Week {attemptsContest.weekNumber}
                 </p>
                 <p className="mt-3 leading-6">
-                  Enter only the external contest result. The automatic +5 first-click reward remains separate.
+                  Enter only the external contest result. Contest opens record participation separately.
                 </p>
               </div>
 
@@ -2628,6 +3160,294 @@ const AdminDashboard = () => {
                 </div>
               </form>
             </section>
+          </div>
+        )}
+
+        {dppOpensSummary && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-canvas/70 p-4 backdrop-blur-md">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="dpp-opens-heading"
+              className="ui-panel-glass my-8 flex max-h-[calc(100vh-4rem)] w-full max-w-5xl flex-col overflow-hidden border-technical/30 shadow-glass"
+            >
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line/70 bg-surface/80 p-5 sm:p-6">
+                <div>
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-technical-text">
+                    First Opens
+                  </p>
+                  <h2 id="dpp-opens-heading" className="mt-1 font-display text-2xl font-semibold text-ink">
+                    {dppOpensSummary.title}
+                  </h2>
+                  <p className="mt-2 text-sm text-ink-muted">
+                    {dppOpensSummary.firstOpenCount} students opened this {getDppTypeLabel(dppOpensSummary.type)} DPP
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDppOpens()}
+                    className="btn btn-secondary hidden sm:inline-flex"
+                    disabled={dppOpensDownloading}
+                  >
+                    <FileSpreadsheet className="size-4" aria-hidden="true" />
+                    {dppOpensDownloading ? 'Downloading...' : 'Download Excel'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    onClick={closeDppOpensModal}
+                    disabled={dppOpensDownloading}
+                    aria-label="Close DPP first opens"
+                  >
+                    <X className="size-5" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadDppOpens()}
+                  className="btn btn-secondary mb-4 w-full justify-center sm:hidden"
+                  disabled={dppOpensDownloading}
+                >
+                  <FileSpreadsheet className="size-4" aria-hidden="true" />
+                  {dppOpensDownloading ? 'Downloading...' : 'Download Excel'}
+                </button>
+
+                {dppOpensError && <InlineFeedback kind="error">{dppOpensError.message}</InlineFeedback>}
+                {dppOpensSummary.type === 'aptitude' && !dppOpensLoading && dppOpens.length > 0 && (
+                  <div className="mt-4 rounded-card border border-primary/25 bg-primary/10 p-4 text-sm leading-6 text-ink-muted">
+                    Enter the student's aptitude performance score. This is added to the Overall Leaderboard separately from the +5 first-open reward.
+                  </div>
+                )}
+                {dppScoreNotice && (
+                  <div className="mt-4">
+                    <InlineFeedback kind="success">{dppScoreNotice}</InlineFeedback>
+                  </div>
+                )}
+
+                {dppOpensLoading ? (
+                  <div className="mt-4">
+                    <LoadingState label="Loading DPP first opens..." />
+                  </div>
+                ) : dppOpens.length === 0 ? (
+                  <div className="mt-4 rounded-card border border-line/80 bg-surface/80 p-8 text-center text-sm text-ink-muted">
+                    No students have opened this DPP yet.
+                  </div>
+                ) : (
+                  <div className="mt-4 overflow-hidden rounded-card border border-line/80 bg-surface/90 shadow-soft">
+                    <p className="border-b border-line/80 bg-surface-muted/50 px-4 py-3 text-xs font-medium text-ink-subtle md:hidden">
+                      {dppOpensSummary.type === 'aptitude'
+                        ? 'Manage aptitude scores from each student card.'
+                        : 'Scroll horizontally to view every first-open field.'}
+                    </p>
+                    {dppOpensSummary.type === 'aptitude' && (
+                      <div className="grid gap-3 p-4 md:hidden">
+                        {dppOpens.map((open) => (
+                          <article key={open.id} className="rounded-card border border-line/80 bg-glass/60 p-4">
+                            <div className="flex flex-col gap-1">
+                              <h3 className="font-display text-base font-semibold text-ink">{open.name}</h3>
+                              <p className="font-mono text-xs font-semibold text-ink-subtle">{open.usn}</p>
+                              <a href={`mailto:${open.email}`} className="break-words text-sm text-technical-text underline decoration-line underline-offset-4">
+                                {open.email}
+                              </a>
+                            </div>
+                            <dl className="mt-4 grid gap-3 text-sm text-ink-muted">
+                              <div>
+                                <dt className="font-semibold text-ink">Phone Number</dt>
+                                <dd>{open.contactNumber}</dd>
+                              </div>
+                              <div>
+                                <dt className="font-semibold text-ink">Year</dt>
+                                <dd>{open.year ?? '-'}</dd>
+                              </div>
+                              <div>
+                                <dt className="font-semibold text-ink">Branch</dt>
+                                <dd>{open.branch}</dd>
+                              </div>
+                              <div>
+                                <dt className="font-semibold text-ink">Opened At</dt>
+                                <dd>{formatDateTime(open.openedAt)}</dd>
+                              </div>
+                            </dl>
+                            <div className="mt-4">
+                              <p className="mb-2 text-sm font-semibold text-ink">Aptitude Score</p>
+                              {renderDppScoreControls(open)}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                    <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                      <table className={`${dppOpensSummary.type === 'aptitude' ? 'hidden min-w-[78rem] md:table' : 'min-w-[64rem]'} w-full border-collapse text-left text-sm`}>
+                        <caption className="sr-only">DPP first opens</caption>
+                        <thead className="border-b border-line-strong bg-dream-soft/50 text-xs uppercase tracking-[0.08em] text-ink-muted">
+                          <tr>
+                            {[
+                              'Name',
+                              'USN',
+                              'Email',
+                              'Phone Number',
+                              'Year',
+                              'Branch',
+                              'Opened At',
+                              ...(dppOpensSummary.type === 'aptitude' ? ['Aptitude Score'] : []),
+                            ].map((heading) => (
+                              <th key={heading} scope="col" className="px-4 py-4 font-semibold">{heading}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line/80">
+                          {dppOpens.map((open) => (
+                            <tr key={open.id} className="bg-surface/80 transition-colors hover:bg-dream-soft/30 motion-reduce:transition-none">
+                              <th scope="row" className="px-4 py-4 font-semibold text-ink">{open.name}</th>
+                              <td className="px-4 py-4 font-mono text-xs font-semibold text-ink-muted">{open.usn}</td>
+                              <td className="px-4 py-4 text-ink-muted">
+                                <a href={`mailto:${open.email}`} className="underline decoration-line underline-offset-4 hover:text-technical-text">
+                                  {open.email}
+                                </a>
+                              </td>
+                              <td className="px-4 py-4 text-ink-muted">{open.contactNumber}</td>
+                              <td className="px-4 py-4 text-ink-muted">{open.year ?? '-'}</td>
+                              <td className="px-4 py-4 text-ink-muted">{open.branch}</td>
+                              <td className="px-4 py-4 text-ink-muted">{formatDateTime(open.openedAt)}</td>
+                              {dppOpensSummary.type === 'aptitude' && (
+                                <td className="px-4 py-4 align-top">
+                                  {renderDppScoreControls(open)}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {isDppModalOpen && (
+          <div className="fixed inset-0 z-[90] overflow-hidden bg-canvas/70 backdrop-blur-md">
+            <div className="flex h-full items-start justify-center px-4 pb-4 pt-24 sm:px-6 sm:pb-6 sm:pt-28 lg:pt-32">
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="dpp-modal-heading"
+                className="ui-panel-glass flex max-h-[calc(100vh-7rem)] w-full max-w-3xl flex-col overflow-hidden border-technical/30 shadow-glass sm:max-h-[calc(100vh-8.5rem)] lg:max-h-[calc(100vh-10rem)]"
+              >
+                <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line/70 bg-surface/80 p-5 sm:p-6">
+                  <div>
+                    <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-technical-text">
+                      {editingDpp ? 'Edit DPP' : 'Add DPP'}
+                    </p>
+                    <h2 id="dpp-modal-heading" className="mt-1 font-display text-2xl font-semibold text-ink">
+                      {editingDpp ? 'Update practice link' : 'Create a practice link'}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon shrink-0"
+                    onClick={closeDppModal}
+                    disabled={dppSubmitting}
+                    aria-label="Close DPP form"
+                  >
+                    <X className="size-5" aria-hidden="true" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleDppSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label>
+                      <span className="mb-2 block text-sm font-semibold text-ink">Type</span>
+                      <select
+                        value={dppForm.type}
+                        onChange={(event) => handleDppFormChange('type', event.target.value)}
+                        disabled={dppTypeLocked}
+                        className="min-h-11 w-full rounded-control border border-line-strong bg-surface/95 px-3 py-2 text-sm text-ink shadow-soft disabled:cursor-not-allowed disabled:opacity-100 focus:border-technical/60 focus:ring-2 focus:ring-technical/20"
+                        required
+                      >
+                        <option value="dsa">DSA</option>
+                        <option value="aptitude">Aptitude</option>
+                      </select>
+                      {dppTypeLocked && (
+                        <span className="mt-2 block text-xs leading-5 text-ink-subtle">
+                          Type is locked after students have opened this DPP.
+                        </span>
+                      )}
+                    </label>
+
+                    <label>
+                      <span className="mb-2 block text-sm font-semibold text-ink">Title</span>
+                      <input
+                        type="text"
+                        value={dppForm.title}
+                        onChange={(event) => handleDppFormChange('title', event.target.value)}
+                        maxLength={120}
+                        placeholder="Arrays Practice Set"
+                        className="min-h-11 w-full rounded-control border border-line-strong bg-surface/95 px-3 py-2 text-sm text-ink shadow-soft placeholder:text-ink-subtle focus:border-technical/60 focus:ring-2 focus:ring-technical/20"
+                        required
+                      />
+                    </label>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-2 block text-sm font-semibold text-ink">External URL</span>
+                      <input
+                        type="url"
+                        value={dppForm.url}
+                        onChange={(event) => handleDppFormChange('url', event.target.value)}
+                        maxLength={1000}
+                        placeholder="https://"
+                        className="min-h-11 w-full rounded-control border border-line-strong bg-surface/95 px-3 py-2 text-sm text-ink shadow-soft placeholder:text-ink-subtle focus:border-technical/60 focus:ring-2 focus:ring-technical/20"
+                        required
+                      />
+                    </label>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-2 block text-sm font-semibold text-ink">Description</span>
+                      <textarea
+                        value={dppForm.description}
+                        onChange={(event) => handleDppFormChange('description', event.target.value)}
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="Optional context for this DPP"
+                        className="w-full rounded-control border border-line-strong bg-surface/95 px-3 py-2 text-sm text-ink shadow-soft placeholder:text-ink-subtle focus:border-technical/60 focus:ring-2 focus:ring-technical/20"
+                      />
+                    </label>
+
+                    <label className="flex items-center gap-3 rounded-card border border-line/80 bg-surface/80 p-4 sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={dppForm.active}
+                        onChange={(event) => handleDppFormChange('active', event.target.checked)}
+                        className="size-4 rounded border-line text-technical focus:ring-technical"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-ink">Active</span>
+                        <span className="block text-xs text-ink-muted">Visible to students when enabled.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  {dppFormError && <InlineFeedback kind="error">{dppFormError.message}</InlineFeedback>}
+
+                  <div className="flex flex-col-reverse gap-3 border-t border-line/70 pt-4 sm:flex-row sm:justify-end">
+                    <button type="button" className="btn btn-secondary" onClick={closeDppModal} disabled={dppSubmitting}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={dppSubmitting}>
+                      {dppSubmitting && (
+                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                      )}
+                      {dppSubmitting ? 'Saving...' : editingDpp ? 'Save Changes' : 'Create DPP'}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
           </div>
         )}
 

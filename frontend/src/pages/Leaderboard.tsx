@@ -216,59 +216,133 @@ const LeaderboardTable = ({
   mode: LeaderboardMode;
   search: string;
 }) => (
-  <div
-    className="overflow-auto border-b border-line bg-surface"
-    role="region"
-    aria-label={`${modeLabels[mode]} table`}
-    tabIndex={0}
-  >
-    <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-left text-sm">
-      <caption className="sr-only">{modeLabels[mode]}</caption>
-      <thead>
-        <tr>
-          {["Rank", "Student", "USN", "Branch", "Year", "Points"].map((column) => (
-            <th
-              key={column}
-              className="sticky top-0 z-10 border-b border-primary/25 bg-surface px-4 py-3 font-semibold text-ink"
+  <>
+    {/* Mobile layout */}
+    <div className="border-b border-line bg-surface sm:hidden">
+      {entries.length > 0 ? (
+        <div className="divide-y divide-line">
+          {entries.map((entry) => (
+            <article
+              key={`${entry.rank}-${entry.studentId}`}
+              className="p-4"
             >
-              {column}
-            </th>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 font-mono text-lg font-bold tabular-nums text-primary-text">
+                      #{entry.rank}
+                    </span>
+
+                    <h3 className="min-w-0 break-words font-display text-base font-semibold text-ink">
+                      {entry.name}
+                    </h3>
+                  </div>
+
+                  <p className="mt-2 break-all font-mono text-xs font-semibold text-ink-muted">
+                    {entry.usn}
+                  </p>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="font-mono text-lg font-bold tabular-nums text-success-text">
+                    {getPoints(entry)}
+                  </p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-subtle">
+                    Points
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full border border-line bg-surface-muted px-3 py-1 text-xs font-medium text-ink-muted">
+                  {entry.branch}
+                </span>
+
+                <span className="rounded-full border border-line bg-surface-muted px-3 py-1 text-xs font-medium text-ink-muted">
+                  Year {entry.year}
+                </span>
+              </div>
+            </article>
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {entries.map((entry) => (
-          <tr key={`${entry.rank}-${entry.studentId}`} className="group transition-colors hover:bg-surface-muted">
-            <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-primary-text">
-              #{entry.rank}
-            </td>
-            <td className="border-b border-line px-4 py-4">
-              <p className="font-semibold text-ink">{entry.name}</p>
-            </td>
-            <td className="border-b border-line px-4 py-4 font-mono text-xs font-semibold text-ink-muted">
-              {entry.usn}
-            </td>
-            <td className="border-b border-line px-4 py-4 text-ink-muted">
-              {entry.branch}
-            </td>
-            <td className="border-b border-line px-4 py-4 font-mono tabular-nums text-ink-muted">
-              {entry.year}
-            </td>
-            <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-success-text">
-              {getPoints(entry)}
-            </td>
-          </tr>
-        ))}
-        {entries.length === 0 && (
+        </div>
+      ) : (
+        <div className="px-4 py-10 text-center text-sm text-ink-muted">
+          {getEmptyMessage(mode, search)}
+        </div>
+      )}
+    </div>
+
+    {/* Tablet / desktop layout */}
+    <div
+      className="hidden overflow-auto border-b border-line bg-surface sm:block"
+      role="region"
+      aria-label={`${modeLabels[mode]} table`}
+      tabIndex={0}
+    >
+      <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-left text-sm">
+        <caption className="sr-only">{modeLabels[mode]}</caption>
+
+        <thead>
           <tr>
-            <td colSpan={6} className="px-4 py-10 text-center text-ink-muted">
-              {getEmptyMessage(mode, search)}
-            </td>
+            {["Rank", "Student", "USN", "Branch", "Year", "Points"].map(
+              (column) => (
+                <th
+                  key={column}
+                  className="sticky top-0 z-10 border-b border-primary/25 bg-surface px-4 py-3 font-semibold text-ink"
+                >
+                  {column}
+                </th>
+              )
+            )}
           </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
+        </thead>
+
+        <tbody>
+          {entries.map((entry) => (
+            <tr
+              key={`${entry.rank}-${entry.studentId}`}
+              className="group transition-colors hover:bg-surface-muted"
+            >
+              <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-primary-text">
+                #{entry.rank}
+              </td>
+
+              <td className="border-b border-line px-4 py-4">
+                <p className="font-semibold text-ink">{entry.name}</p>
+              </td>
+
+              <td className="border-b border-line px-4 py-4 font-mono text-xs font-semibold text-ink-muted">
+                {entry.usn}
+              </td>
+
+              <td className="border-b border-line px-4 py-4 text-ink-muted">
+                {entry.branch}
+              </td>
+
+              <td className="border-b border-line px-4 py-4 font-mono tabular-nums text-ink-muted">
+                {entry.year}
+              </td>
+
+              <td className="border-b border-line px-4 py-4 font-mono font-bold tabular-nums text-success-text">
+                {getPoints(entry)}
+              </td>
+            </tr>
+          ))}
+
+          {entries.length === 0 && (
+            <tr>
+              <td
+                colSpan={6}
+                className="px-4 py-10 text-center text-ink-muted"
+              >
+                {getEmptyMessage(mode, search)}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  </>
 );
 
 export default function Leaderboard() {
@@ -412,7 +486,7 @@ export default function Leaderboard() {
   return (
     <PageTransition>
       <main className="section-glow-subtle min-h-screen bg-canvas text-ink transition-colors duration-500">
-        <div className="site-container-wide section-space pt-24 lg:pt-section">
+        <div className="site-container-wide section-space min-w-0 overflow-x-hidden pt-24 lg:pt-section">
           <motion.header
             className="mx-auto mb-8 max-w-4xl text-center sm:mb-10"
             initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
@@ -469,7 +543,10 @@ export default function Leaderboard() {
                     </h2>
                   </div>
 
-                  <form onSubmit={handleSearch} className="flex min-w-0 gap-2">
+                  <form
+                    onSubmit={handleSearch}
+                    className="flex min-w-0 flex-col gap-2 sm:flex-row"
+                  >
                     <label htmlFor="leaderboard-search" className="sr-only">
                       Search by student name or USN
                     </label>
@@ -481,7 +558,10 @@ export default function Leaderboard() {
                       placeholder="Search name or USN"
                       className="min-h-11 min-w-0 flex-1 rounded-control border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25"
                     />
-                    <button type="submit" className="btn btn-primary shrink-0">
+                    <button
+                      type="submit"
+                      className="btn btn-primary w-full shrink-0 justify-center sm:w-auto"
+                    >
                       <Search className="size-4" aria-hidden="true" />
                       Search
                     </button>

@@ -20,16 +20,42 @@ export interface StudentWeeklyContest {
   claimed: boolean;
 }
 
+export type StudentDppType = "dsa" | "aptitude";
+
+export interface StudentDpp {
+  id: string;
+  type: StudentDppType;
+  title: string;
+  url: string;
+  description?: string;
+  opened: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface StudentWeeklyContestsResponse {
   success: true;
   contests: StudentWeeklyContest[];
 }
 
+interface StudentDppsResponse {
+  success: true;
+  dpps: StudentDpp[];
+}
+
 interface OpenStudentWeeklyContestResponse {
   success: true;
+  firstOpen?: boolean;
   awarded: boolean;
   pointsAwarded: number;
   contestUrl: string;
+}
+
+interface OpenStudentDppResponse {
+  success: true;
+  firstOpen: boolean;
+  pointsAwarded: number;
+  dppUrl: string;
 }
 
 interface UpdateStudentProfileResponse {
@@ -52,6 +78,19 @@ export const getStudentWeeklyContests = (signal?: AbortSignal) =>
 export const openStudentWeeklyContest = (contestId: string) =>
   apiRequest<OpenStudentWeeklyContestResponse>(
     `/api/student/weekly-contests/${encodeURIComponent(contestId)}/open`,
+    {
+      method: "POST",
+    }
+  );
+
+export const getStudentDpps = (signal?: AbortSignal) =>
+  apiRequest<StudentDppsResponse>("/api/student/dpps", {
+    signal,
+  });
+
+export const openStudentDpp = (dppId: string) =>
+  apiRequest<OpenStudentDppResponse>(
+    `/api/student/dpps/${encodeURIComponent(dppId)}/open`,
     {
       method: "POST",
     }

@@ -3,6 +3,7 @@ import mongoose, { Document, Model, Schema, Types } from "mongoose";
 export const POINT_TRANSACTION_SOURCES = [
   "event",
   "weekly_contest",
+  "dpp",
   "admin_adjustment",
 ] as const;
 
@@ -17,6 +18,10 @@ export const WEEKLY_CONTEST_POINT_TYPES = [
 export type WeeklyContestPointType =
   (typeof WEEKLY_CONTEST_POINT_TYPES)[number];
 
+export const DPP_POINT_TYPES = ["open_reward", "aptitude_score"] as const;
+
+export type DppPointType = (typeof DPP_POINT_TYPES)[number];
+
 export interface IPointTransaction extends Document {
   studentId: Types.ObjectId;
   points: number;
@@ -26,6 +31,8 @@ export interface IPointTransaction extends Document {
   contestId?: Types.ObjectId | string;
   weeklyContestId?: Types.ObjectId;
   weeklyContestPointType?: WeeklyContestPointType;
+  dppId?: Types.ObjectId;
+  dppPointType?: DppPointType;
   weekNumber?: number;
   previousPoints?: number;
   previousDescription?: string;
@@ -77,6 +84,16 @@ const pointTransactionSchema = new Schema<IPointTransaction>(
       enum: WEEKLY_CONTEST_POINT_TYPES,
       index: true,
     },
+    dppId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dpp",
+      index: true,
+    },
+    dppPointType: {
+      type: String,
+      enum: DPP_POINT_TYPES,
+      index: true,
+    },
     weekNumber: {
       type: Number,
       min: 1,
@@ -125,6 +142,18 @@ pointTransactionSchema.index(
       source: "weekly_contest",
       weeklyContestId: { $exists: true },
       weeklyContestPointType: { $exists: true },
+    },
+  }
+);
+pointTransactionSchema.index(
+  { studentId: 1, dppId: 1, dppPointType: 1 },
+  {
+    name: "unique_dpp_open_reward_points",
+    unique: true,
+    partialFilterExpression: {
+      source: "dpp",
+      dppId: { $exists: true },
+      dppPointType: { $exists: true },
     },
   }
 );

@@ -11,6 +11,7 @@ import {
   getStudentWeeklyContests,
   openStudentWeeklyContest,
 } from "../controllers/weeklyContestController";
+import { getStudentDpps, openStudentDpp } from "../controllers/dppController";
 
 const router = Router();
 
@@ -22,6 +23,8 @@ router.get("/events", getStudentEvents);
 router.post("/events/:eventId/register", registerForEvent);
 router.get("/weekly-contests", getStudentWeeklyContests);
 router.post("/weekly-contests/:contestId/open", openStudentWeeklyContest);
+router.get("/dpps", getStudentDpps);
+router.post("/dpps/:dppId/open", openStudentDpp);
 router.patch("/profile", updateStudentProfile);
 
 export default router;
