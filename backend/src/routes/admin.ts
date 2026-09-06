@@ -32,6 +32,7 @@ import {
   upsertAdminWeeklyContestScore,
 } from "../controllers/weeklyContestController";
 import {
+  archiveAdminDpp,
   createAdminDpp,
   exportAdminDppOpens,
   getAdminDppOpens,
@@ -69,6 +70,7 @@ router.get("/dpps", getAdminDpps);
 router.get("/dpps/:dppId/opens/export", exportAdminDppOpens);
 router.get("/dpps/:dppId/opens", getAdminDppOpens);
 router.put("/dpps/:dppId/students/:studentId/score", upsertAdminDppScore);
+router.patch("/dpps/:dppId/archive", archiveAdminDpp);
 router.patch("/dpps/:dppId", updateAdminDpp);
 router.get("/students", getStudents);
 router.get("/students/export", exportStudents);

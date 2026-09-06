@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
   Trophy,
   UserCheck,
   Users,
@@ -52,6 +53,7 @@ import {
 import { registrationBranchOptions } from '../lib/registrationBranches';
 import {
   awardStudentPoints,
+  archiveAdminDpp,
   createAdminDpp,
   createAdminWeeklyContest,
   downloadAdminDppOpensExcel,
@@ -576,6 +578,9 @@ const AdminDashboard = () => {
   const [dppScoreErrors, setDppScoreErrors] = useState<Record<string, string>>({});
   const [dppScoreNotice, setDppScoreNotice] = useState<string | null>(null);
   const [pendingDppScoreStudentIds, setPendingDppScoreStudentIds] = useState<Record<string, boolean>>({});
+  const [removingDpp, setRemovingDpp] = useState<AdminDpp | null>(null);
+  const [dppRemoveSubmitting, setDppRemoveSubmitting] = useState(false);
+  const [dppRemoveError, setDppRemoveError] = useState<AdminRequestError | null>(null);
 
   const [search, setSearch] = useState('');
   const [branch, setBranch] = useState('');
@@ -1646,6 +1651,44 @@ const AdminDashboard = () => {
     }
   };
 
+  const openRemoveDppConfirm = (dpp: AdminDpp) => {
+    setRemovingDpp(dpp);
+    setDppRemoveError(null);
+    setDppsNotice(null);
+  };
+
+  const closeRemoveDppConfirm = () => {
+    if (dppRemoveSubmitting) return;
+    setRemovingDpp(null);
+    setDppRemoveError(null);
+  };
+
+  const handleConfirmRemoveDpp = async () => {
+    if (!removingDpp || dppRemoveSubmitting) return;
+
+    setDppRemoveSubmitting(true);
+    setDppRemoveError(null);
+    setDppsError(null);
+    setDppsNotice(null);
+
+    try {
+      const response = await archiveAdminDpp(removingDpp.id);
+      setDpps((current) => current.filter((dpp) => dpp.id !== response.dpp.id));
+      setDppsNotice(response.message ?? 'DPP removed successfully.');
+      setRemovingDpp(null);
+    } catch (error) {
+      const requestError = classifyAdminError(error, 'Unable to remove DPP.');
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+        setRemovingDpp(null);
+      } else {
+        setDppRemoveError(requestError);
+      }
+    } finally {
+      setDppRemoveSubmitting(false);
+    }
+  };
+
   const openDppOpensModal = async (dpp: AdminDpp) => {
     setDppOpensSummary({
       id: dpp.id,
@@ -2413,6 +2456,14 @@ const AdminDashboard = () => {
                         <Pencil className="size-4" aria-hidden="true" />
                         Edit
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => openRemoveDppConfirm(dpp)}
+                        className="btn min-h-11 rounded-full border border-rose/30 bg-rose/10 px-4 text-rose-text hover:bg-rose/20"
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Remove
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -3159,6 +3210,74 @@ const AdminDashboard = () => {
                   </button>
                 </div>
               </form>
+            </section>
+          </div>
+        )}
+
+        {removingDpp && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas/70 p-4 backdrop-blur-md">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="remove-dpp-heading"
+              className="ui-panel-glass w-full max-w-lg border-rose/30 p-5 shadow-glass sm:p-6"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-rose-text">
+                    Remove DPP
+                  </p>
+                  <h2 id="remove-dpp-heading" className="mt-1 break-words font-display text-2xl font-semibold text-ink">
+                    Remove &quot;{removingDpp.title}&quot;?
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon shrink-0"
+                  onClick={closeRemoveDppConfirm}
+                  disabled={dppRemoveSubmitting}
+                  aria-label="Close remove DPP confirmation"
+                >
+                  <X className="size-5" aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-card border border-line/80 bg-surface/80 p-4 text-sm leading-6 text-ink-muted">
+                <p>
+                  Students will no longer see or be able to open this DPP.
+                  Existing participation records, +5 first-open points, and aptitude scores will be preserved.
+                </p>
+              </div>
+
+              {dppRemoveError && (
+                <div className="mt-4">
+                  <InlineFeedback kind="error">{dppRemoveError.message}</InlineFeedback>
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={closeRemoveDppConfirm}
+                  disabled={dppRemoveSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn min-h-11 rounded-full border border-rose/30 bg-rose/10 px-4 text-rose-text hover:bg-rose/20"
+                  onClick={() => void handleConfirmRemoveDpp()}
+                  disabled={dppRemoveSubmitting}
+                >
+                  {dppRemoveSubmitting ? (
+                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  )}
+                  {dppRemoveSubmitting ? 'Removing...' : 'Remove DPP'}
+                </button>
+              </div>
             </section>
           </div>
         )}

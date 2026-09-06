@@ -10,6 +10,7 @@ export interface IDpp extends Document {
   url: string;
   description?: string;
   active: boolean;
+  archived: boolean;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -58,6 +59,11 @@ const dppSchema = new Schema<IDpp>(
       default: true,
       index: true,
     },
+    archived: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -71,6 +77,7 @@ const dppSchema = new Schema<IDpp>(
 );
 
 dppSchema.index({ active: 1, type: 1, createdAt: -1 });
+dppSchema.index({ archived: 1, active: 1, type: 1, createdAt: -1 });
 
 const Dpp: Model<IDpp> =
   (mongoose.models.Dpp as Model<IDpp> | undefined) ||

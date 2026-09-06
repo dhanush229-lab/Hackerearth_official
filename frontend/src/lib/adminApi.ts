@@ -109,6 +109,7 @@ export interface AdminDpp {
   url: string;
   description?: string;
   active: boolean;
+  archived?: boolean;
   firstOpenCount: number;
   createdAt: string;
   updatedAt: string;
@@ -585,6 +586,15 @@ export const updateAdminDpp = (
       method: 'PATCH',
       credentials: 'include',
       body: JSON.stringify(input),
+    },
+  );
+
+export const archiveAdminDpp = (dppId: string) =>
+  apiRequest<AdminDppResponse>(
+    `/api/admin/dpps/${encodeURIComponent(dppId)}/archive`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
     },
   );
 

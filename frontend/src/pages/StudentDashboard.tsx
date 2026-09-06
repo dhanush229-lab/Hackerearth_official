@@ -589,6 +589,14 @@ const StudentDashboard = () => {
     .slice(0, 3);
   const dsaDpps = studentDpps.filter((dpp) => dpp.type === "dsa");
   const aptitudeDpps = studentDpps.filter((dpp) => dpp.type === "aptitude");
+  const studentDppGroups = [
+    user.enrolledDomains.includes("DSA")
+      ? { type: "dsa" as const, title: "DSA DPP", items: dsaDpps }
+      : null,
+    user.enrolledDomains.includes("Aptitude")
+      ? { type: "aptitude" as const, title: "Aptitude DPP", items: aptitudeDpps }
+      : null,
+  ].filter((group): group is NonNullable<typeof group> => group !== null);
 
   return (
     <PageTransition>
@@ -980,11 +988,13 @@ const StudentDashboard = () => {
                   </span>
                 </div>
 
-                <div className="mt-6 grid gap-5 lg:grid-cols-2">
-                  {[
-                    { type: "dsa" as const, title: "DSA DPP", items: dsaDpps },
-                    { type: "aptitude" as const, title: "Aptitude DPP", items: aptitudeDpps },
-                  ].map((group) => {
+                {studentDppGroups.length === 0 && !isLoadingStudentDpps ? (
+                  <div className="mt-6 rounded-card border border-line/80 bg-surface/75 p-5 text-sm leading-6 text-ink-muted">
+                    No DPPs are available for your enrolled domains right now.
+                  </div>
+                ) : (
+                  <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                    {studentDppGroups.map((group) => {
                     const accent = getDppAccentClasses(group.type);
 
                     return (
@@ -1030,8 +1040,9 @@ const StudentDashboard = () => {
                         </div>
                       </article>
                     );
-                  })}
-                </div>
+                    })}
+                  </div>
+                )}
               </section>
             </SectionReveal>
 

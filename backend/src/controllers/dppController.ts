@@ -4,7 +4,7 @@ import mongoose, { Types } from "mongoose";
 import ActivityOpen from "../models/ActivityOpen";
 import Dpp, { DPP_TYPES, DppType, IDpp } from "../models/Dpp";
 import PointTransaction from "../models/pointTransaction";
-import User from "../models/user";
+import User, { EnrolledDomain } from "../models/user";
 
 interface DppBody {
   type?: unknown;
@@ -41,6 +41,11 @@ const MAX_DPP_DESCRIPTION_LENGTH = 1000;
 const MAX_DPP_URL_LENGTH = 1000;
 const MAX_DPP_SCORE = 100000;
 const OPEN_STUDENT_FIELDS = "name usn email contactNumber year branch";
+const availableDppFilter = { archived: { $ne: true } };
+const DPP_REQUIRED_DOMAIN: Record<DppType, EnrolledDomain> = {
+  dsa: "DSA",
+  aptitude: "Aptitude",
+};
 
 const normalizeString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
@@ -67,6 +72,11 @@ const validateUrl = (value: string) => {
 
 const toActivityType = (type: DppType) =>
   type === "dsa" ? "dsa_dpp" : "aptitude_dpp";
+
+const canStudentAccessDppType = (
+  enrolledDomains: readonly EnrolledDomain[] | undefined,
+  dppType: DppType
+) => enrolledDomains?.includes(DPP_REQUIRED_DOMAIN[dppType]) ?? false;
 
 const parseDppScore = (value: unknown) => {
   if (typeof value !== "number" && typeof value !== "string") {
@@ -167,6 +177,7 @@ const toAdminDpp = (dpp: IDpp, firstOpenCount = 0) => ({
   url: dpp.url,
   description: dpp.description ?? "",
   active: dpp.active,
+  archived: dpp.archived === true,
   firstOpenCount,
   createdAt: dpp.createdAt,
   updatedAt: dpp.updatedAt,
@@ -295,7 +306,9 @@ export const createAdminDpp = async (
 
 export const getAdminDpps = async (_req: Request, res: Response) => {
   try {
-    const dpps = await Dpp.find().sort({ type: 1, createdAt: -1 }).exec();
+    const dpps = await Dpp.find(availableDppFilter)
+      .sort({ type: 1, createdAt: -1 })
+      .exec();
     const openCounts = await getOpenCountsByDpp(dpps.map((dpp) => dpp._id));
 
     return res.status(200).json({
@@ -344,6 +357,14 @@ export const updateAdminDpp = async (
       });
     }
 
+    if (dpp.archived === true) {
+      return res.status(410).json({
+        success: false,
+        code: "DPP_ARCHIVED",
+        message: "This DPP has been removed and can no longer be edited.",
+      });
+    }
+
     if (validation.update.type && validation.update.type !== dpp.type) {
       const existingOpen = await ActivityOpen.exists({
         dppId: dpp._id,
@@ -367,6 +388,49 @@ export const updateAdminDpp = async (
     return res.status(200).json({
       success: true,
       message: "DPP updated successfully.",
+      dpp: toAdminDpp(dpp, openCounts.get(dpp._id.toString()) ?? 0),
+    });
+  } catch {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const archiveAdminDpp = async (
+  req: Request<{ dppId: string }>,
+  res: Response
+) => {
+  try {
+    const { dppId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(dppId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_DPP_ID",
+        message: "A valid DPP id is required.",
+      });
+    }
+
+    const dpp = await Dpp.findById(dppId).exec();
+    if (!dpp) {
+      return res.status(404).json({
+        success: false,
+        code: "DPP_NOT_FOUND",
+        message: "DPP not found.",
+      });
+    }
+
+    if (dpp.archived !== true) {
+      dpp.archived = true;
+      await dpp.save();
+    }
+
+    const openCounts = await getOpenCountsByDpp([dpp._id]);
+
+    return res.status(200).json({
+      success: true,
+      message: "DPP removed successfully.",
       dpp: toAdminDpp(dpp, openCounts.get(dpp._id.toString()) ?? 0),
     });
   } catch {
@@ -698,12 +762,16 @@ export const getStudentDpps = async (req: Request, res: Response) => {
 
     const studentObjectId = new Types.ObjectId(req.auth.userId);
     const [student, dpps, openedDppIds] = await Promise.all([
-      User.exists({
+      User.findOne({
         _id: studentObjectId,
         role: "student",
         isActive: true,
-      }).exec(),
-      Dpp.find({ active: true }).sort({ type: 1, createdAt: -1 }).exec(),
+      })
+        .select("enrolledDomains")
+        .exec(),
+      Dpp.find({ active: true, ...availableDppFilter })
+        .sort({ type: 1, createdAt: -1 })
+        .exec(),
       ActivityOpen.distinct("dppId", {
         studentId: studentObjectId,
         activityType: { $in: ["dsa_dpp", "aptitude_dpp"] },
@@ -723,7 +791,11 @@ export const getStudentDpps = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      dpps: dpps.map((dpp) => toStudentDpp(dpp, openedSet)),
+      dpps: dpps
+        .filter((dpp) =>
+          canStudentAccessDppType(student.enrolledDomains, dpp.type)
+        )
+        .map((dpp) => toStudentDpp(dpp, openedSet)),
     });
   } catch {
     return res.status(500).json({
@@ -765,9 +837,9 @@ export const openStudentDpp = async (
         role: "student",
         isActive: true,
       })
-        .select("_id")
+        .select("_id enrolledDomains")
         .exec(),
-      Dpp.findOne({ _id: dppObjectId, active: true }).exec(),
+      Dpp.findById(dppObjectId).exec(),
     ]);
 
     if (!student) {
@@ -783,6 +855,30 @@ export const openStudentDpp = async (
         success: false,
         code: "DPP_NOT_FOUND",
         message: "Active DPP not found.",
+      });
+    }
+
+    if (dpp.archived === true) {
+      return res.status(410).json({
+        success: false,
+        code: "DPP_ARCHIVED",
+        message: "This DPP is no longer available.",
+      });
+    }
+
+    if (!dpp.active) {
+      return res.status(404).json({
+        success: false,
+        code: "DPP_NOT_FOUND",
+        message: "Active DPP not found.",
+      });
+    }
+
+    if (!canStudentAccessDppType(student.enrolledDomains, dpp.type)) {
+      return res.status(403).json({
+        success: false,
+        code: "DPP_DOMAIN_NOT_ENROLLED",
+        message: "You are not enrolled in this DPP domain.",
       });
     }
 
