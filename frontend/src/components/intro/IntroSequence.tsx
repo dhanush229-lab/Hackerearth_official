@@ -40,11 +40,12 @@ const DUST_CONFIG = Array.from({ length: 18 }, (_, index) => ({
 
 type IntroSequenceProps = {
   children: ReactNode;
+  onComplete?: () => void;
 };
 
 type IntroStyle = CSSProperties & Record<`--${string}`, string | number>;
 
-export default function IntroSequence({ children }: IntroSequenceProps) {
+export default function IntroSequence({ children, onComplete }: IntroSequenceProps) {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
   const [reducedMotion] = useState(() =>
@@ -64,6 +65,7 @@ export default function IntroSequence({ children }: IntroSequenceProps) {
     if (exitStartedRef.current) return;
 
     exitStartedRef.current = true;
+    onComplete?.();
     clearTimers();
     setIsExiting(true);
 
@@ -73,7 +75,7 @@ export default function IntroSequence({ children }: IntroSequenceProps) {
         reducedMotion ? REDUCED_EXIT_DURATION_MS : STANDARD_EXIT_DURATION_MS,
       ),
     );
-  }, [clearTimers, reducedMotion]);
+  }, [clearTimers, onComplete, reducedMotion]);
 
   useEffect(() => {
     if (!isVisible) return;
