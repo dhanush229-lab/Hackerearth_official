@@ -8,6 +8,7 @@ export interface IWeeklyContest extends Document {
   startDateTime: Date;
   endDateTime: Date;
   active: boolean;
+  archived: boolean;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -58,6 +59,11 @@ const weeklyContestSchema = new Schema<IWeeklyContest>(
       default: true,
       index: true,
     },
+    archived: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -83,7 +89,7 @@ weeklyContestSchema.pre("validate", function validateWeeklyContestDates() {
   }
 });
 
-weeklyContestSchema.index({ active: 1, startDateTime: 1 });
+weeklyContestSchema.index({ active: 1, archived: 1, startDateTime: 1 });
 
 const WeeklyContest: Model<IWeeklyContest> =
   (mongoose.models.WeeklyContest as Model<IWeeklyContest> | undefined) ||

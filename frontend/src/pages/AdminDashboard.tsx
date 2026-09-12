@@ -54,6 +54,7 @@ import { registrationBranchOptions } from '../lib/registrationBranches';
 import {
   awardStudentPoints,
   archiveAdminDpp,
+  archiveAdminWeeklyContest,
   createAdminDpp,
   createAdminWeeklyContest,
   downloadAdminDppOpensExcel,
@@ -560,6 +561,9 @@ const AdminDashboard = () => {
   const [contestScoreInput, setContestScoreInput] = useState('');
   const [scoreSubmitting, setScoreSubmitting] = useState(false);
   const [scoreError, setScoreError] = useState<AdminRequestError | null>(null);
+  const [removingWeeklyContest, setRemovingWeeklyContest] = useState<AdminWeeklyContest | null>(null);
+  const [weeklyContestRemoveSubmitting, setWeeklyContestRemoveSubmitting] = useState(false);
+  const [weeklyContestRemoveError, setWeeklyContestRemoveError] = useState<AdminRequestError | null>(null);
   const [dpps, setDpps] = useState<AdminDpp[]>([]);
   const [dppsLoading, setDppsLoading] = useState(true);
   const [dppsError, setDppsError] = useState<AdminRequestError | null>(null);
@@ -1563,6 +1567,46 @@ const AdminDashboard = () => {
     }
   };
 
+  const openRemoveWeeklyContestConfirm = (contest: AdminWeeklyContest) => {
+    setRemovingWeeklyContest(contest);
+    setWeeklyContestRemoveError(null);
+    setWeeklyContestsNotice(null);
+  };
+
+  const closeRemoveWeeklyContestConfirm = () => {
+    if (weeklyContestRemoveSubmitting) return;
+    setRemovingWeeklyContest(null);
+    setWeeklyContestRemoveError(null);
+  };
+
+  const handleConfirmRemoveWeeklyContest = async () => {
+    if (!removingWeeklyContest || weeklyContestRemoveSubmitting) return;
+
+    setWeeklyContestRemoveSubmitting(true);
+    setWeeklyContestRemoveError(null);
+    setWeeklyContestsError(null);
+    setWeeklyContestsNotice(null);
+
+    try {
+      const response = await archiveAdminWeeklyContest(removingWeeklyContest.id);
+      setWeeklyContests((current) =>
+        current.filter((contest) => contest.id !== response.contest.id)
+      );
+      setWeeklyContestsNotice(response.message ?? 'Weekly contest removed successfully.');
+      setRemovingWeeklyContest(null);
+    } catch (error) {
+      const requestError = classifyAdminError(error, 'Unable to remove weekly contest.');
+      if (isGlobalAuthorizationError(requestError)) {
+        setGlobalAuthError(requestError);
+        setRemovingWeeklyContest(null);
+      } else {
+        setWeeklyContestRemoveError(requestError);
+      }
+    } finally {
+      setWeeklyContestRemoveSubmitting(false);
+    }
+  };
+
   const openCreateDppModal = () => {
     setEditingDpp(null);
     setDppForm(emptyDppForm);
@@ -2337,6 +2381,14 @@ const AdminDashboard = () => {
                       <button type="button" onClick={() => openEditWeeklyContestModal(contest)} className="btn btn-secondary rounded-full">
                         <Pencil className="size-4" aria-hidden="true" />
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openRemoveWeeklyContestConfirm(contest)}
+                        className="btn min-h-11 rounded-full border border-rose/30 bg-rose/10 px-4 text-rose-text hover:bg-rose/20"
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Remove
                       </button>
                     </div>
                   </article>
@@ -3725,6 +3777,74 @@ const AdminDashboard = () => {
                 </form>
               </section>
             </div>
+          </div>
+        )}
+
+        {removingWeeklyContest && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas/70 p-4 backdrop-blur-md">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="remove-weekly-contest-heading"
+              className="ui-panel-glass w-full max-w-lg border-rose/30 p-5 shadow-glass sm:p-6"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-rose-text">
+                    Remove Weekly Contest
+                  </p>
+                  <h2 id="remove-weekly-contest-heading" className="mt-1 break-words font-display text-2xl font-semibold text-ink">
+                    Remove &quot;{removingWeeklyContest.title}&quot;?
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon shrink-0"
+                  onClick={closeRemoveWeeklyContestConfirm}
+                  disabled={weeklyContestRemoveSubmitting}
+                  aria-label="Close remove weekly contest confirmation"
+                >
+                  <X className="size-5" aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-card border border-line/80 bg-surface/80 p-4 text-sm leading-6 text-ink-muted">
+                <p>
+                  Students will no longer see or be able to open this weekly contest.
+                  Existing attempts, contest scores, weekly leaderboard history, and overall leaderboard points will be preserved.
+                </p>
+              </div>
+
+              {weeklyContestRemoveError && (
+                <div className="mt-4">
+                  <InlineFeedback kind="error">{weeklyContestRemoveError.message}</InlineFeedback>
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={closeRemoveWeeklyContestConfirm}
+                  disabled={weeklyContestRemoveSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn min-h-11 rounded-full border border-rose/30 bg-rose/10 px-4 text-rose-text hover:bg-rose/20"
+                  onClick={() => void handleConfirmRemoveWeeklyContest()}
+                  disabled={weeklyContestRemoveSubmitting}
+                >
+                  {weeklyContestRemoveSubmitting ? (
+                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  )}
+                  {weeklyContestRemoveSubmitting ? 'Removing...' : 'Remove Contest'}
+                </button>
+              </div>
+            </section>
           </div>
         )}
 
