@@ -24,6 +24,7 @@ import {
 } from "../controllers/eventController";
 import { uploadEventPosterMiddleware } from "../middleware/eventPosterUpload";
 import {
+  archiveAdminWeeklyContest,
   createAdminWeeklyContest,
   exportAdminWeeklyContestAttempts,
   getAdminWeeklyContestAttempts,
@@ -64,6 +65,7 @@ router.put(
   "/weekly-contests/:contestId/students/:studentId/score",
   upsertAdminWeeklyContestScore
 );
+router.patch("/weekly-contests/:contestId/archive", archiveAdminWeeklyContest);
 router.patch("/weekly-contests/:contestId", updateAdminWeeklyContest);
 router.post("/dpps", createAdminDpp);
 router.get("/dpps", getAdminDpps);

@@ -65,6 +65,7 @@ export interface AdminWeeklyContest {
   startDateTime: string;
   endDateTime: string;
   active: boolean;
+  archived?: boolean;
   status: AdminWeeklyContestStatus;
   attemptCount: number;
   createdAt: string;
@@ -501,6 +502,15 @@ export const updateAdminWeeklyContest = (
       method: 'PATCH',
       credentials: 'include',
       body: JSON.stringify(input),
+    },
+  );
+
+export const archiveAdminWeeklyContest = (contestId: string) =>
+  apiRequest<AdminWeeklyContestResponse>(
+    `/api/admin/weekly-contests/${encodeURIComponent(contestId)}/archive`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
     },
   );
 

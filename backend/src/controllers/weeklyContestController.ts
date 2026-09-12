@@ -28,6 +28,7 @@ const MAX_CONTEST_TITLE_LENGTH = 120;
 const MAX_CONTEST_DESCRIPTION_LENGTH = 1000;
 const MAX_CONTEST_URL_LENGTH = 1000;
 const ATTEMPT_STUDENT_FIELDS = "name usn email contactNumber year";
+const visibleWeeklyContestFilter = { archived: { $ne: true } };
 
 const normalizeString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
@@ -209,6 +210,7 @@ const toAdminContest = (contest: IWeeklyContest, attemptCount = 0) => ({
   startDateTime: contest.startDateTime,
   endDateTime: contest.endDateTime,
   active: contest.active,
+  archived: contest.archived === true,
   status: getContestStatus(contest),
   attemptCount,
   createdAt: contest.createdAt,
@@ -314,7 +316,9 @@ export const createAdminWeeklyContest = async (
 
 export const getAdminWeeklyContests = async (_req: Request, res: Response) => {
   try {
-    const contests = await WeeklyContest.find().sort({ weekNumber: 1 }).exec();
+    const contests = await WeeklyContest.find(visibleWeeklyContestFilter)
+      .sort({ weekNumber: 1 })
+      .exec();
     const attemptCounts = await getAttemptCountsByContest(
       contests.map((contest) => contest._id)
     );
@@ -353,6 +357,14 @@ export const updateAdminWeeklyContest = async (
         success: false,
         code: "WEEKLY_CONTEST_NOT_FOUND",
         message: "Weekly contest not found.",
+      });
+    }
+
+    if (contest.archived === true) {
+      return res.status(409).json({
+        success: false,
+        code: "WEEKLY_CONTEST_ARCHIVED",
+        message: "This weekly contest has been removed and can no longer be edited.",
       });
     }
 
@@ -414,7 +426,10 @@ export const getStudentWeeklyContests = async (req: Request, res: Response) => {
       });
     }
 
-    const contests = await WeeklyContest.find({ active: true })
+    const contests = await WeeklyContest.find({
+      active: true,
+      ...visibleWeeklyContestFilter,
+    })
       .sort({ weekNumber: 1 })
       .exec();
     const claimedContestIds = await ActivityOpen.distinct("weeklyContestId", {
@@ -485,6 +500,14 @@ export const openStudentWeeklyContest = async (
       });
     }
 
+    if (contest.archived === true) {
+      return res.status(410).json({
+        success: false,
+        code: "WEEKLY_CONTEST_ARCHIVED",
+        message: "This weekly contest is no longer available.",
+      });
+    }
+
     const status = getContestStatus(contest);
     if (status !== "live") {
       const response =
@@ -524,6 +547,52 @@ export const openStudentWeeklyContest = async (
       awarded: false,
       pointsAwarded: 0,
       contestUrl: contest.contestUrl,
+    });
+  } catch (_error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error.",
+    });
+  }
+};
+
+export const archiveAdminWeeklyContest = async (
+  req: Request<{ contestId: string }>,
+  res: Response
+) => {
+  try {
+    const { contestId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(contestId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_CONTEST_ID",
+        message: "A valid contest id is required.",
+      });
+    }
+
+    const contest = await WeeklyContest.findById(contestId).exec();
+    if (!contest) {
+      return res.status(404).json({
+        success: false,
+        code: "WEEKLY_CONTEST_NOT_FOUND",
+        message: "Weekly contest not found.",
+      });
+    }
+
+    if (contest.archived !== true) {
+      contest.archived = true;
+      await contest.save();
+    }
+
+    const attemptCounts = await getAttemptCountsByContest([contest._id]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Weekly contest removed successfully. Attempts, scores, and leaderboard history are preserved.",
+      contest: toAdminContest(
+        contest,
+        attemptCounts.get(contest._id.toString()) ?? 0
+      ),
     });
   } catch (_error) {
     return res.status(500).json({
