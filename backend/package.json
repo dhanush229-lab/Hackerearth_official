@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "test:db": "ts-node src/testDb.ts",
     "test:email": "ts-node src/testEmail.ts",
+    "test:leaderboard-search-ranks": "ts-node src/scripts/testLeaderboardSearchRanks.ts",
     "create:admin": "ts-node --files src/scripts/createAdmin.ts"
   },
   "keywords": [],

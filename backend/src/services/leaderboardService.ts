@@ -72,11 +72,6 @@ interface WeeklyAggregationResult {
   points: number;
 }
 
-interface FacetResult<TEntry> {
-  metadata: Array<{ total: number }>;
-  data: TEntry[];
-}
-
 interface StudentRankAggregationResult {
   _id: Types.ObjectId;
   totalPoints: number;
@@ -101,9 +96,6 @@ const parsePositiveInteger = (
   return max ? Math.min(parsed, max) : parsed;
 };
 
-const escapeRegex = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 export const parseLeaderboardPagination = ({
   page,
   limit,
@@ -114,18 +106,40 @@ export const parseLeaderboardPagination = ({
   search: typeof search === "string" ? search.trim() : "",
 });
 
-const buildStudentMatch = (search: string): PipelineStage.Match["$match"] => {
-  const match: PipelineStage.Match["$match"] = {
-    role: "student",
-    isActive: true,
+const activeStudentMatch: PipelineStage.Match["$match"] = {
+  role: "student",
+  isActive: true,
+};
+
+const matchesLeaderboardSearch = (
+  entry: { name?: string; usn?: string },
+  search: string
+) => {
+  if (!search) return true;
+
+  const normalizedSearch = search.toLowerCase();
+  return (
+    entry.name?.toLowerCase().includes(normalizedSearch) ||
+    entry.usn?.toLowerCase().includes(normalizedSearch)
+  );
+};
+
+export const filterAndPaginateRankedLeaderboard = <
+  TEntry extends { rank: number; name?: string; usn?: string },
+>(
+  entries: TEntry[],
+  search: string,
+  skip: number,
+  limit: number
+) => {
+  const filtered = entries.filter((entry) =>
+    matchesLeaderboardSearch(entry, search)
+  );
+
+  return {
+    total: filtered.length,
+    entries: filtered.slice(skip, skip + limit),
   };
-
-  if (search) {
-    const regex = new RegExp(escapeRegex(search), "i");
-    match.$or = [{ name: regex }, { usn: regex }];
-  }
-
-  return match;
 };
 
 const mapPagination = (
@@ -149,8 +163,8 @@ export const getOverallLeaderboard = async ({
   search: string;
 }) => {
   const skip = (page - 1) * limit;
-  const [result] = await User.aggregate<FacetResult<OverallAggregationResult>>([
-    { $match: buildStudentMatch(search) },
+  const rankedStudents = await User.aggregate<OverallAggregationResult>([
+    { $match: activeStudentMatch },
     {
       $lookup: {
         from: "pointtransactions",
@@ -171,28 +185,18 @@ export const getOverallLeaderboard = async ({
     },
     { $sort: { totalPoints: -1, name: 1, email: 1, _id: 1 } },
     {
-      $facet: {
-        metadata: [{ $count: "total" }],
-        data: [
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $project: {
-              name: 1,
-              usn: 1,
-              branch: 1,
-              year: 1,
-              totalPoints: 1,
-            },
-          },
-        ],
+      $project: {
+        name: 1,
+        usn: 1,
+        branch: 1,
+        year: 1,
+        totalPoints: 1,
       },
     },
   ]).exec();
 
-  const total = result?.metadata[0]?.total ?? 0;
-  const leaderboard = (result?.data ?? []).map((entry, index) => ({
-    rank: skip + index + 1,
+  const rankedLeaderboard = rankedStudents.map((entry, index) => ({
+    rank: index + 1,
     studentId: String(entry._id),
     name: entry.name,
     usn: entry.usn,
@@ -200,6 +204,13 @@ export const getOverallLeaderboard = async ({
     year: entry.year,
     totalPoints: entry.totalPoints,
   }));
+
+  const { entries: leaderboard, total } = filterAndPaginateRankedLeaderboard(
+    rankedLeaderboard,
+    search,
+    skip,
+    limit
+  );
 
   return {
     leaderboard,
@@ -248,58 +259,36 @@ export const getWeeklyLeaderboard = async ({
     weeklyMatch.weekNumber = week;
   }
 
-  const [result] = await PointTransaction.aggregate<
-    FacetResult<WeeklyAggregationResult>
-  >([
-    { $match: weeklyMatch },
-    { $group: { _id: "$studentId", points: { $sum: "$points" } } },
-    {
-      $lookup: {
-        from: "users",
-        localField: "_id",
-        foreignField: "_id",
-        as: "student",
+  const rankedStudents = await PointTransaction.aggregate<WeeklyAggregationResult>(
+    [
+      { $match: weeklyMatch },
+      { $group: { _id: "$studentId", points: { $sum: "$points" } } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "student",
+        },
       },
-    },
-    { $unwind: "$student" },
-    { $match: { "student.role": "student", "student.isActive": true } },
-    ...(search
-      ? [
-        {
-          $match: {
-            $or: [
-              { "student.name": new RegExp(escapeRegex(search), "i") },
-              { "student.usn": new RegExp(escapeRegex(search), "i") },
-            ],
-          },
-        } satisfies PipelineStage.Match,
-      ]
-      : []),
-    { $sort: { points: -1, "student.name": 1, "student.usn": 1, _id: 1 } },
-    {
-      $facet: {
-        metadata: [{ $count: "total" }],
-        data: [
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $project: {
-              studentId: "$_id",
-              name: "$student.name",
-              usn: "$student.usn",
-              branch: "$student.branch",
-              year: "$student.year",
-              points: 1,
-            },
-          },
-        ],
+      { $unwind: "$student" },
+      { $match: { "student.role": "student", "student.isActive": true } },
+      { $sort: { points: -1, "student.name": 1, "student.usn": 1, _id: 1 } },
+      {
+        $project: {
+          studentId: "$_id",
+          name: "$student.name",
+          usn: "$student.usn",
+          branch: "$student.branch",
+          year: "$student.year",
+          points: 1,
+        },
       },
-    },
-  ]).exec();
+    ]
+  ).exec();
 
-  const total = result?.metadata[0]?.total ?? 0;
-  const leaderboard = (result?.data ?? []).map((entry, index) => ({
-    rank: skip + index + 1,
+  const rankedLeaderboard = rankedStudents.map((entry, index) => ({
+    rank: index + 1,
     studentId: String(entry.studentId),
     name: entry.name,
     usn: entry.usn,
@@ -307,6 +296,13 @@ export const getWeeklyLeaderboard = async ({
     year: entry.year,
     points: entry.points,
   }));
+
+  const { entries: leaderboard, total } = filterAndPaginateRankedLeaderboard(
+    rankedLeaderboard,
+    search,
+    skip,
+    limit
+  );
 
   return {
     leaderboard,
